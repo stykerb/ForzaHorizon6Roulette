@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FH6 Roulette</title>
+<meta name="description" content="Random build/race challenge generator for Forza Horizon 6.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎲</text></svg>">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <h1><span class="accent">FH6</span> ROULETTE</h1>
+      <p class="tagline">Spin up a random race, car, and challenge for Forza Horizon 6</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="global-actions">
+      <button type="button" id="spin-all" class="btn btn-primary btn-big">🎲 SPIN ALL</button>
+      <button type="button" id="copy-challenge" class="btn">📋 Copy Challenge</button>
+      <button type="button" id="reset-filters" class="btn">↺ Reset Filters</button>
+    </div>
+
+    <div id="categories" class="grid"></div>
+
+    <section class="history-section">
+      <div class="history-header">
+        <h2>Challenge History</h2>
+        <button type="button" id="clear-history" class="btn btn-tiny">Clear</button>
+      </div>
+      <div id="history-list" class="history-list"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Data lives in <code>/data</code> as plain JS files — ask to add new brands, races,
+      or classes any time a game update ships, and they'll be added there.
+    </p>
+  </footer>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="data/races.js"></script>
+  <script src="data/carTypes.js"></script>
+  <script src="data/brands.js"></script>
+  <script src="data/countries.js"></script>
+  <script src="data/decades.js"></script>
+  <script src="data/classes.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
