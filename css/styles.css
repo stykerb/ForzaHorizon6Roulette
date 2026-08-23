@@ -5,8 +5,10 @@
   --card-border: #262e3d;
   --text: #eef1f6;
   --text-dim: #97a1b3;
-  --accent: #8bd346;
+  --accent: #ff2d78;
   --accent-2: #ff6a1a;
+  --accent-dark: #c81361;
+  --on-accent: #2b0012;
   --danger: #e0402f;
   --radius: 10px;
   font-size: 16px;
@@ -28,7 +30,7 @@ body {
   padding: 2.5rem 1.5rem 1.5rem;
   text-align: center;
   border-bottom: 1px solid var(--card-border);
-  background: linear-gradient(180deg, rgba(139, 211, 70, 0.08), transparent 70%);
+  background: linear-gradient(180deg, rgba(255, 45, 120, 0.08), transparent 70%);
 }
 .site-header h1 {
   margin: 0;
@@ -87,8 +89,8 @@ body {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #5fae1e);
-  color: #05230a;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  color: var(--on-accent);
   border: none;
 }
 .btn-big {
@@ -153,7 +155,7 @@ body {
 }
 .toggle-switch input:checked + .toggle-track .toggle-thumb {
   transform: translateX(16px);
-  background: #05230a;
+  background: var(--on-accent);
 }
 .toggle-switch input:focus-visible + .toggle-track {
   outline: 2px solid var(--accent);
@@ -202,7 +204,7 @@ body {
   position: absolute;
   inset: 0 0 auto 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
   opacity: 0.85;
 }
 .card.empty-pool { border-color: var(--danger); }
@@ -484,7 +486,7 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
-.modal-tab.active { background: var(--accent); color: #05230a; border-color: var(--accent); }
+.modal-tab.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 .modal-search { margin: 0.85rem 1.25rem 0; }
 
@@ -558,7 +560,7 @@ body {
 .weight-bar-fill {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
   border-radius: 999px 0 0 999px;
 }
 .weight-base {
@@ -601,38 +603,9 @@ body {
   flex-wrap: wrap;
   gap: 0.6rem;
 }
-.preset-btn {
-  position: relative;
-}
-.preset-btn::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%) translateY(-6px);
-  background: var(--bg-alt);
-  border: 1px solid var(--card-border);
-  color: var(--text);
-  padding: 0.55rem 0.75rem;
-  border-radius: 8px;
-  font-size: 0.75rem;
-  font-weight: 400;
-  line-height: 1.35;
-  white-space: normal;
-  width: max-content;
-  max-width: 240px;
-  text-align: left;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 40;
-}
-.preset-btn:hover::after,
-.preset-btn:focus-visible::after {
-  opacity: 1;
-  transform: translateX(-50%) translateY(-10px);
-}
+/* Preset tooltips use the native `title` attribute (browser-rendered, so
+   they can never clip against the viewport edge the way a CSS ::after
+   tooltip pinned to the button would). */
 
 @media (max-width: 720px) {
   .global-actions { flex-direction: column; align-items: stretch; }

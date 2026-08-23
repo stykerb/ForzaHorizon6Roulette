@@ -817,18 +817,19 @@
     {
       id: "street-gang",
       label: "🌃 Street Gang",
-      tooltip: "Road, Street & Touge races. Excludes Buggies, Muscle, Racers, Track Toys, Rare Classics, Pickups/4x4's, Offroad, Utility Hero & UTV car types. No Drag races.",
+      tooltip: "Road, Street & Touge races. Excludes Buggies, Classic/Retro Muscle, Racers, Track Toys, Rare Classics, Pickups/4x4's, Offroad, Utility Hero, UTV, Drift & Classic/Retro Rally car types. No Drag races.",
       apply: () => {
         enableOnly("race", ["road-circuit", "road-sprint", "street-racing", "touge-battle"]);
         disableSome("carType", [
           "buggies", "unlimited-buggies",
-          "classic-muscle", "modern-muscle", "retro-muscle",
+          "classic-muscle", "retro-muscle",
           "classic-racers", "retro-racers",
           "track-toys", "extreme-track-toys",
           "rare-classics", "pickups-4x4s",
           "offroad", "unlimited-offroad",
           "utility-heroes", "sports-utility-heroes",
           "utvs",
+          "drift-cars", "classic-rally", "retro-rally",
         ]);
       },
     },
@@ -864,7 +865,7 @@
     btn.type = "button";
     btn.className = "btn preset-btn";
     btn.textContent = preset.label;
-    btn.dataset.tooltip = preset.tooltip;
+    btn.title = preset.tooltip;
     btn.addEventListener("click", () => applyPreset(preset));
     presetBar.appendChild(btn);
   });
