@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FH6 Roulette</title>
+<title>Forza Horizon 6 Roulette</title>
 <meta name="description" content="Random build/race challenge generator for Forza Horizon 6.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎲</text></svg>">
 <link rel="stylesheet" href="css/styles.css">
@@ -11,7 +11,7 @@
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <h1><span class="accent">FH6</span> ROULETTE</h1>
+      <h1><span class="accent">Forza Horizon 6</span> Roulette</h1>
       <p class="tagline">Spin up a random race, car, and challenge for Forza Horizon 6</p>
     </div>
   </header>
@@ -19,8 +19,10 @@
   <main class="wrap">
     <div class="global-actions">
       <button type="button" id="spin-all" class="btn btn-primary btn-big">🎲 SPIN ALL</button>
+      <button type="button" id="reset-spin" class="btn">🧹 Reset Spin</button>
       <button type="button" id="copy-challenge" class="btn">📋 Copy Challenge</button>
       <button type="button" id="reset-filters" class="btn">↺ Reset Filters</button>
+      <button type="button" id="show-weights" class="btn">⚖️ Weights</button>
       <button type="button" id="show-data-table" class="btn">📊 Show Data</button>
     </div>
 
@@ -28,7 +30,7 @@
       <label class="toggle-switch">
         <input type="checkbox" id="weighted-toggle">
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        <span class="toggle-label">Weighted by rarity <em>(more cars = picked more often)</em></span>
+        <span class="toggle-label">Weighted by rarity <em>(more cars/races = picked more often)</em></span>
       </label>
       <label class="toggle-switch">
         <input type="checkbox" id="strict-toggle">
@@ -75,6 +77,23 @@
       </div>
       <input type="search" id="data-modal-search" class="filter-search modal-search" placeholder="Search...">
       <div id="data-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="weights-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>Adjust Weights</h2>
+        <button type="button" id="weights-modal-close" class="btn btn-tiny">✕ Close</button>
+      </div>
+      <div class="modal-tabs">
+        <button type="button" class="modal-tab" data-weights-tab="race">Race Type</button>
+        <button type="button" class="modal-tab" data-weights-tab="carType">Car Type</button>
+        <button type="button" class="modal-tab" data-weights-tab="country">Country</button>
+        <button type="button" class="modal-tab" data-weights-tab="brand">Brand</button>
+        <button type="button" class="modal-tab" data-weights-tab="decade">Decade</button>
+      </div>
+      <div id="weights-modal-body" class="modal-body"></div>
     </div>
   </div>
 

@@ -1,31 +1,27 @@
 /**
  * js/app.js
  * -----------------------------------------------------------------------
- * FH6 Roulette - app logic.
+ * Forza Horizon 6 Roulette - app logic.
  *
- * Two dependent chains get rolled, plus one standalone category:
- *
+ * Three independent groups get rolled:
  *   1. Race Type -> Specific Race
- *      Specific Race is filtered by whichever Race Types are enabled in
- *      the Race Type card's filters (data/raceTypes.js + data/individualRaces.js).
+ *   2. Season (standalone)
+ *   3. Car Type -> Country -> Brand -> Decade -> Performance Class
  *
- *   2. Car Type -> Country -> Brand -> Decade -> Performance Class
- *      Each stage rules out choices that don't correspond to a real car
- *      in data/cars.js given everything else currently locked in - both
- *      what's been *rolled* upstream AND what every stage's *filters*
- *      allow, so a narrow filter on one stage (e.g. Country -> Austria
- *      only) can never leave a later stage with zero valid options.
- *      Performance Class isn't picked from a fixed list so much as
- *      computed - see computeLegalClassIds() below for the tuning-
- *      headroom rules.
+ * Each card's displayed pool (the #/## count, its "show options" popover,
+ * and what a solo respin draws from) is *structural*: it only depends on
+ * whatever's ROLLED in the stages before it in that group, plus its own
+ * filter - never on a later stage's filter. Car Type, first in its chain,
+ * is always just "how many of my own options are enabled," full stop.
  *
- *   3. Season - fully independent, plain equal-odds pick.
- *
- * Every category (except Performance Class) can also roll "Any" - a
- * wildcard meaning "no constraint here." Car Type/Country/Brand/Decade
- * are weighted by how many real cars back each option, toggle-able off
- * for uniform "truly random" odds. Rendering, filter panels, and
- * persistence stay generic over the CATEGORIES list.
+ * That means a stage can still hit a dead end (e.g. Country locked to
+ * Austria leaves no legal Class once Car Type happens to roll something
+ * with zero Austria cars). Rather than pre-solving that away by making
+ * every stage aware of every other stage's filters, each group is rolled
+ * with backtracking (rollChain): a dead end retries the stage that caused
+ * it with a different value, so the group always resolves to a real,
+ * consistent combination without any stage's own count/options list
+ * needing to account for what's below it.
  * -----------------------------------------------------------------------
  */
 (function () {
@@ -33,15 +29,11 @@
 
   const ANY = Object.freeze({ id: "__any__", name: "Any" });
 
-  // The car-attribute cascade, in roll order. Every stage's legality is
-  // resolved jointly with every OTHER stage in this list (see
-  // carsSatisfyingAllExcept) - not just the ones rolled before it - so
-  // filters on any of them keep every stage reachable.
   const CASCADE_ORDER = ["carType", "country", "brand", "decade"];
   const CASCADE_CAR_FIELD = { carType: "type", country: "country", brand: "make", decade: "decade" };
 
   const CATEGORIES = [
-    { key: "race", label: "Race Type", icon: "\u{1F3C1}", data: RACE_TYPES, group: "race", allowAny: true, weightable: false },
+    { key: "race", label: "Race Type", icon: "\u{1F3C1}", data: RACE_TYPES, group: "race", allowAny: true, weightable: true },
     { key: "specificRace", label: "Specific Race", icon: "\u{1F5FA}️", data: INDIVIDUAL_RACES, group: "race", allowAny: true, weightable: false, noFilter: true, note: "Locked to the Race Type above once it's rolled - otherwise pulls from every enabled Race Type." },
     { key: "season", label: "Season", icon: "\u{1F324}️", data: SEASONS, group: "race", allowAny: true, weightable: false },
     { key: "carType", label: "Car Type", icon: "\u{1F697}", data: CAR_TYPES, group: "car", allowAny: true, weightable: true },
@@ -53,7 +45,14 @@
   const categoryByKey = {};
   CATEGORIES.forEach((c) => (categoryByKey[c.key] = c));
 
-  const CLASS_ORDER = PERFORMANCE_CLASSES.map((c) => c.id); // low -> high, e.g. ["d","c","b","a","s1","s2","r","x"]
+  const WEIGHTABLE_KEYS = CATEGORIES.filter((c) => c.weightable).map((c) => c.key); // ["race","carType","country","brand","decade"]
+
+  const CLASS_ORDER = PERFORMANCE_CLASSES.map((c) => c.id);
+
+  // Race counts per type, precomputed once - the base weight for the Race
+  // Type card, mirroring how car counts weight Car Type/Country/Brand/Decade.
+  const RACE_COUNTS_BY_TYPE = new Map();
+  INDIVIDUAL_RACES.forEach((r) => RACE_COUNTS_BY_TYPE.set(r.typeId, (RACE_COUNTS_BY_TYPE.get(r.typeId) || 0) + 1));
 
   const LS_FILTERS = "fh6r-disabled-ids-v2";
   const LS_HISTORY = "fh6r-history-v2";
@@ -61,11 +60,17 @@
   const LS_STOCK_ONLY = "fh6r-stock-only-v1";
   const LS_WEIGHTED = "fh6r-weighted-v1";
   const LS_STRICT = "fh6r-strict-v1";
+  const LS_ALWAYS_ANY = "fh6r-always-any-v1";
+  const LS_MULTIPLIERS = "fh6r-weight-multipliers-v1";
   const MAX_HISTORY = 30;
 
   function countryName(id) {
     const c = COUNTRIES.find((x) => x.id === id);
     return c ? c.name : id;
+  }
+  function raceTypeName(typeId) {
+    const t = RACE_TYPES.find((x) => x.id === typeId);
+    return t ? t.name : typeId;
   }
 
   // ---- persistence -------------------------------------------------
@@ -86,19 +91,21 @@
     }
   }
 
-  // disabledIds: { race: [id, id...], carType: [...], ... }
-  // Anything NOT listed is enabled by default - new items added to a
-  // data file later are automatically included for existing users.
   const disabledIds = loadJSON(LS_FILTERS, {});
   CATEGORIES.forEach((c) => {
     if (!disabledIds[c.key]) disabledIds[c.key] = [];
   });
 
   let history = loadJSON(LS_HISTORY, []);
-  let current = loadJSON(LS_CURRENT, {}); // { race: item, carType: item, ..., specificRace: item, season: item }
+  let current = loadJSON(LS_CURRENT, {});
   let stockOnly = loadJSON(LS_STOCK_ONLY, false);
   let weighted = loadJSON(LS_WEIGHTED, true);
   let strictMode = loadJSON(LS_STRICT, false);
+  let alwaysAny = loadJSON(LS_ALWAYS_ANY, {});
+  let multipliers = loadJSON(LS_MULTIPLIERS, {}); // { carType: {id: mult}, ... }
+  WEIGHTABLE_KEYS.forEach((k) => {
+    if (!multipliers[k]) multipliers[k] = {};
+  });
 
   function persistFilters() {
     saveJSON(LS_FILTERS, disabledIds);
@@ -113,31 +120,29 @@
     saveJSON(LS_STOCK_ONLY, stockOnly);
     saveJSON(LS_WEIGHTED, weighted);
     saveJSON(LS_STRICT, strictMode);
+    saveJSON(LS_ALWAYS_ANY, alwaysAny);
+  }
+  function persistMultipliers() {
+    saveJSON(LS_MULTIPLIERS, multipliers);
   }
 
   function isAny(item) {
     return !!item && item.id === ANY.id;
   }
 
-  // ---- the car cascade ---------------------------------------------------
-  // Cars consistent with every cascade stage EXCEPT excludeKey - both that
-  // stage's own disabled-filter set AND (if it's been rolled, and isn't
-  // "Any") its rolled value. Passing null excludes nothing, i.e. every
-  // stage's filters+rolled value applies (used for Performance Class,
-  // which isn't itself one of the four structural fields).
-  function carsSatisfyingAllExcept(excludeKey) {
-    const disabledSets = {};
-    CASCADE_ORDER.forEach((key) => {
-      disabledSets[key] = new Set(disabledIds[key]);
-    });
+  function multiplierFor(catKey, itemId) {
+    const m = multipliers[catKey] && multipliers[catKey][itemId];
+    return m === undefined || m === null ? 1 : m; // 0 is a valid, deliberate multiplier - don't fall back to 1 for it
+  }
+
+  // ---- the car cascade (structural - only stages ABOVE matter) -----------
+  function carsMatchingUpTo(stageKey) {
+    const idx = stageKey === "class" ? CASCADE_ORDER.length : CASCADE_ORDER.indexOf(stageKey);
     return CARS.filter((car) => {
-      for (let i = 0; i < CASCADE_ORDER.length; i++) {
+      for (let i = 0; i < idx; i++) {
         const key = CASCADE_ORDER[i];
-        if (key === excludeKey) continue;
-        const field = CASCADE_CAR_FIELD[key];
-        if (disabledSets[key].has(car[field])) return false;
         const sel = current[key];
-        if (sel && !isAny(sel) && car[field] !== sel.id) return false;
+        if (sel && !isAny(sel) && car[CASCADE_CAR_FIELD[key]] !== sel.id) return false;
       }
       return true;
     });
@@ -148,11 +153,9 @@
   }
 
   // "Impossible" performance classes are classes lower than the lowest-PI
-  // stock car available given everything else rolled - cars can be tuned
-  // UP, never down. Every car can reach S2 or lower; reaching R needs a
-  // stock S2-or-higher car in the pool, and reaching X needs a stock
-  // R-or-higher car in the pool. With "Stock cars only" on, none of that
-  // tuning headroom applies - only classes cars actually ship in are legal.
+  // stock car available given everything rolled above - cars tune UP, never
+  // down. Every car can reach S2; R needs a stock S2+ car in the pool, X
+  // needs a stock R+ car. "Stock cars only" turns off that tuning headroom.
   function computeLegalClassIds(matchingCars) {
     if (matchingCars.length === 0) return [];
     if (stockOnly) {
@@ -169,55 +172,66 @@
     return CLASS_ORDER.slice(minIdx, maxIdx + 1);
   }
 
-  // ---- pools: {item, weight}[] of REAL (non-Any) options ------------------
+  function appliedWeight(cat, itemId, baseCount) {
+    const base = cat.weightable && weighted ? baseCount : 1;
+    return Math.max(base * multiplierFor(cat.key, itemId), 0);
+  }
+
+  // ---- pools: {item, weight, base}[] of REAL (non-Any) options ------------
   function realPoolFor(cat) {
     if (cat.key === "class") {
       const disabled = new Set(disabledIds.class);
-      const matchingCars = carsSatisfyingAllExcept(null);
+      const matchingCars = carsMatchingUpTo("class");
       const legalIds = new Set(computeLegalClassIds(matchingCars));
-      return PERFORMANCE_CLASSES.filter((item) => legalIds.has(item.id) && !disabled.has(item.id)).map((item) => ({ item, weight: 1 }));
+      return PERFORMANCE_CLASSES.filter((item) => legalIds.has(item.id) && !disabled.has(item.id)).map((item) => ({ item, weight: 1, base: 1 }));
     }
 
     if (CASCADE_ORDER.indexOf(cat.key) !== -1) {
       const disabled = new Set(disabledIds[cat.key]);
-      const matchingCars = carsSatisfyingAllExcept(cat.key);
+      const matchingCars = carsMatchingUpTo(cat.key);
       const field = CASCADE_CAR_FIELD[cat.key];
       const counts = new Map();
       matchingCars.forEach((car) => {
         const id = car[field];
         counts.set(id, (counts.get(id) || 0) + 1);
       });
-      const useWeights = cat.weightable && weighted;
       return cat.data
         .filter((item) => counts.has(item.id) && !disabled.has(item.id))
-        .map((item) => ({ item, weight: useWeights ? counts.get(item.id) : 1 }));
+        .map((item) => ({ item, weight: appliedWeight(cat, item.id, counts.get(item.id)), base: counts.get(item.id) }));
     }
 
     if (cat.key === "specificRace") {
       const disabled = new Set(disabledIds.race); // reuses the Race Type card's filter
       const raceSel = current.race;
-      return INDIVIDUAL_RACES.filter((r) => !disabled.has(r.typeId) && (!raceSel || isAny(raceSel) || r.typeId === raceSel.id)).map((item) => ({ item, weight: 1 }));
+      return INDIVIDUAL_RACES.filter((r) => !disabled.has(r.typeId) && (!raceSel || isAny(raceSel) || r.typeId === raceSel.id)).map((item) => ({ item, weight: 1, base: 1 }));
     }
 
-    // "race", "season" - simple filter-based, equal odds
+    if (cat.key === "race") {
+      const disabled = new Set(disabledIds.race);
+      return cat.data
+        .filter((item) => !disabled.has(item.id))
+        .map((item) => ({ item, weight: appliedWeight(cat, item.id, RACE_COUNTS_BY_TYPE.get(item.id) || 0), base: RACE_COUNTS_BY_TYPE.get(item.id) || 0 }));
+    }
+
+    // "season" - no natural base weight, always equal odds (manual multiplier N/A)
     const disabled = new Set(disabledIds[cat.key]);
-    return cat.data.filter((item) => !disabled.has(item.id)).map((item) => ({ item, weight: 1 }));
+    return cat.data.filter((item) => !disabled.has(item.id)).map((item) => ({ item, weight: 1, base: 1 }));
   }
 
-  // Full pool including "Any", when it applies. "Any" is skipped when
-  // Strict Mode is on, the category doesn't allow it, or there's only one
-  // real option anyway (Any would be redundant with it). Any's own weight
-  // is the pool's average weight, so it reads as "about as likely as a
-  // typical single option" rather than dominating or vanishing.
+  // Full pool including "Any". Skipped when Strict Mode is on, the category
+  // doesn't allow it, or there's only one real option (Any would be
+  // redundant with it). Any's weight is the pool's average, so it reads as
+  // "about as likely as a typical option" rather than dominating/vanishing.
   function fullPool(cat) {
     const real = realPoolFor(cat);
     if (!cat.allowAny || strictMode || real.length <= 1) return real;
     const totalWeight = real.reduce((sum, r) => sum + r.weight, 0);
-    return [...real, { item: ANY, weight: totalWeight / real.length }];
+    return [...real, { item: ANY, weight: totalWeight / real.length, base: null }];
   }
 
   function weightedRandom(pool) {
     const total = pool.reduce((sum, p) => sum + p.weight, 0);
+    if (total <= 0) return pool[Math.floor(Math.random() * pool.length)].item; // all-zero weights: fall back to uniform
     let r = Math.random() * total;
     for (let i = 0; i < pool.length; i++) {
       r -= pool[i].weight;
@@ -226,9 +240,54 @@
     return pool[pool.length - 1].item;
   }
 
+  // ---- rolling, with backtracking so a dead end never surfaces as a
+  // failure the user has to work around manually --------------------------
+  function stagesFrom(key) {
+    if (key === "race") return ["race", "specificRace"];
+    const idx = CASCADE_ORDER.indexOf(key);
+    if (idx !== -1) return [...CASCADE_ORDER.slice(idx), "class"];
+    return [key]; // specificRace, season, class
+  }
+
+  function rollChain(stageKeys) {
+    const excludeSets = {};
+    stageKeys.forEach((k) => (excludeSets[k] = new Set()));
+    let attempts = 0;
+    const MAX_ATTEMPTS = 20000;
+
+    function tryStage(i) {
+      if (i >= stageKeys.length) return true;
+      const key = stageKeys[i];
+      const cat = categoryByKey[key];
+
+      if (alwaysAny[key] && cat.allowAny) {
+        current[key] = ANY;
+        if (tryStage(i + 1)) return true;
+        current[key] = null;
+        return false;
+      }
+
+      for (;;) {
+        if (++attempts > MAX_ATTEMPTS) return false;
+        const pool = fullPool(cat).filter((p) => !excludeSets[key].has(p.item.id));
+        if (pool.length === 0) {
+          current[key] = null;
+          return false;
+        }
+        const pick = weightedRandom(pool);
+        current[key] = pick;
+        if (tryStage(i + 1)) return true;
+        excludeSets[key].add(pick.id);
+      }
+    }
+
+    return tryStage(0);
+  }
+
   // ---- DOM building ----------------------------------------------------
   const roots = { race: document.getElementById("race-categories"), car: document.getElementById("car-categories") };
   const cardsByKey = {};
+  let openPopoverKey = null;
 
   function buildCard(cat) {
     const card = document.createElement("section");
@@ -240,7 +299,10 @@
     header.innerHTML = `
       <span class="card-icon">${cat.icon}</span>
       <span class="card-label">${cat.label}</span>
-      <span class="card-count" data-role="count"></span>
+      <span class="card-count-wrap">
+        <button type="button" class="card-count" data-role="count" title="Click to see current options"></button>
+        <div class="count-popover hidden" data-role="count-popover"></div>
+      </span>
     `;
 
     const result = document.createElement("div");
@@ -267,6 +329,19 @@
       note.className = "card-note";
       note.textContent = cat.note;
       card.appendChild(note);
+    }
+    if (cat.allowAny) {
+      const alwaysRow = document.createElement("label");
+      alwaysRow.className = "always-any-toggle";
+      alwaysRow.innerHTML = `
+        <input type="checkbox" data-role="always-any" ${alwaysAny[cat.key] ? "checked" : ""}>
+        <span>\u{1F3AF} Always land on "Any"</span>
+      `;
+      card.appendChild(alwaysRow);
+      alwaysRow.querySelector("input").addEventListener("change", (e) => {
+        alwaysAny[cat.key] = e.target.checked;
+        persistSettings();
+      });
     }
     card.appendChild(actions);
 
@@ -297,6 +372,10 @@
 
     // events
     card.querySelector('[data-role="spin-one"]').addEventListener("click", () => spinOne(cat.key, true));
+    card.querySelector('[data-role="count"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePopover(cat.key);
+    });
     if (filterPanel) {
       card.querySelector('[data-role="toggle-filter"]').addEventListener("click", () => {
         filterPanel.classList.toggle("hidden");
@@ -350,10 +429,6 @@
       });
   }
 
-  // A filter change on ANY cascade-linked category can shift what's
-  // reachable for every OTHER one (that's the whole point of the fix), so
-  // recompute every visible count together rather than just the card whose
-  // filter changed.
   function refreshAllCounts() {
     CATEGORIES.forEach(updateCount);
   }
@@ -361,12 +436,56 @@
   function updateCount(cat) {
     const card = cardsByKey[cat.key];
     const total = cat.data.length;
-    const enabled = realPoolFor(cat).length;
-    card.querySelector('[data-role="count"]').textContent = `${enabled}/${total}`;
+    const pool = realPoolFor(cat);
+    card.querySelector('[data-role="count"]').textContent = `${pool.length}/${total}`;
     const spinBtn = card.querySelector('[data-role="spin-one"]');
-    spinBtn.disabled = enabled === 0;
-    card.classList.toggle("empty-pool", enabled === 0);
+    spinBtn.disabled = pool.length === 0;
+    card.classList.toggle("empty-pool", pool.length === 0);
+    if (openPopoverKey === cat.key) renderPopover(cat, pool);
   }
+
+  function renderPopover(cat, pool) {
+    const card = cardsByKey[cat.key];
+    const pop = card.querySelector('[data-role="count-popover"]');
+    if (pool.length === 0) {
+      pop.innerHTML = `<p class="popover-empty">Nothing available - check filters${CASCADE_ORDER.indexOf(cat.key) > 0 || cat.key === "class" || cat.key === "specificRace" ? " or what's rolled above" : ""}.</p>`;
+      return;
+    }
+    const sorted = [...pool].sort((a, b) => b.weight - a.weight || a.item.name.localeCompare(b.item.name));
+    const showWeight = cat.weightable;
+    pop.innerHTML = `
+      <div class="popover-title">${pool.length} option${pool.length === 1 ? "" : "s"} possible right now</div>
+      <ul class="popover-list">
+        ${sorted.map((p) => `<li>${p.item.name}${showWeight ? ` <span class="popover-count">(${p.base})</span>` : ""}</li>`).join("")}
+      </ul>
+    `;
+  }
+
+  function togglePopover(key) {
+    if (openPopoverKey === key) {
+      closePopover();
+      return;
+    }
+    closePopover();
+    openPopoverKey = key;
+    const cat = categoryByKey[key];
+    renderPopover(cat, realPoolFor(cat));
+    cardsByKey[key].querySelector('[data-role="count-popover"]').classList.remove("hidden");
+  }
+
+  function closePopover() {
+    if (!openPopoverKey) return;
+    const card = cardsByKey[openPopoverKey];
+    if (card) card.querySelector('[data-role="count-popover"]').classList.add("hidden");
+    openPopoverKey = null;
+  }
+
+  document.addEventListener("click", (e) => {
+    if (openPopoverKey && !e.target.closest(".count-popover")) closePopover();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && openPopoverKey) closePopover();
+  });
 
   function renderResult(cat) {
     const card = cardsByKey[cat.key];
@@ -391,80 +510,51 @@
     const card = cardsByKey[cat.key];
     const resultEl = card.querySelector('[data-role="result"]');
     resultEl.classList.remove("flash");
-    void resultEl.offsetWidth; // force reflow so the animation can restart
+    void resultEl.offsetWidth;
     resultEl.classList.add("flash");
-  }
-
-  function raceTypeName(typeId) {
-    const t = RACE_TYPES.find((x) => x.id === typeId);
-    return t ? t.name : typeId;
-  }
-
-  // Rolls exactly one stage's value from its current pool. Returns the
-  // picked item, or null if that stage has no valid options right now.
-  function rollStageValue(cat) {
-    const pool = fullPool(cat);
-    if (pool.length === 0) {
-      current[cat.key] = null;
-      return null;
-    }
-    const pick = weightedRandom(pool);
-    current[cat.key] = pick;
-    return pick;
-  }
-
-  // Spinning a stage invalidates everything downstream of it (a new Car
-  // Type can make the current Country/Brand/Decade/Class impossible; a new
-  // Race Type can make the current Specific Race impossible), so those
-  // stale values are cleared and re-rolled together, always in order.
-  function stagesFrom(key) {
-    if (key === "race") return ["race", "specificRace"];
-    const idx = CASCADE_ORDER.indexOf(key);
-    if (idx !== -1) return [...CASCADE_ORDER.slice(idx), "class"];
-    return [key]; // specificRace, season, class - nothing depends on these
   }
 
   function spinOne(key, animate) {
     const stages = stagesFrom(key);
-    // Clear stale downstream values FIRST so they don't wrongly constrain
-    // the stages being recomputed (e.g. a stale Decade shouldn't limit
-    // what Brand can become when re-rolling Brand onward).
     stages.forEach((k) => {
       current[k] = null;
     });
-    let anyEmpty = false;
+    const ok = rollChain(stages);
     stages.forEach((stageKey) => {
       const cat = categoryByKey[stageKey];
-      const pick = rollStageValue(cat);
-      if (pick === null) anyEmpty = true;
       renderResult(cat);
       if (animate) flashResult(cat);
     });
     persistCurrent();
     refreshAllCounts();
-    if (anyEmpty) {
-      showToast("No valid options for one or more categories - check filters.");
-    }
+    if (!ok) showToast("No valid options for one or more categories - check filters.");
     return current[key];
   }
 
-  const SPIN_ALL_ORDER = ["race", "specificRace", "season", "carType", "country", "brand", "decade", "class"];
+  function resetSpin() {
+    CATEGORIES.forEach((cat) => {
+      current[cat.key] = null;
+      renderResult(cat);
+    });
+    persistCurrent();
+    refreshAllCounts();
+    showToast("Results cleared - every card rolls fresh now.");
+  }
 
   function spinAll() {
     CATEGORIES.forEach((cat) => {
       current[cat.key] = null;
     });
-    let anyEmpty = false;
-    SPIN_ALL_ORDER.forEach((key) => {
-      const cat = categoryByKey[key];
-      const pick = rollStageValue(cat);
-      if (pick === null) anyEmpty = true;
+    const okRace = rollChain(["race", "specificRace"]);
+    const okSeason = rollChain(["season"]);
+    const okCar = rollChain([...CASCADE_ORDER, "class"]);
+    CATEGORIES.forEach((cat) => {
       renderResult(cat);
       flashResult(cat);
     });
     persistCurrent();
     refreshAllCounts();
-    if (anyEmpty) {
+    if (!okRace || !okSeason || !okCar) {
       showToast("One or more categories have no valid options - check filters.");
     }
     pushHistory();
@@ -510,14 +600,15 @@
     showToast._t = setTimeout(() => toast.classList.remove("show"), 2600);
   }
 
-  // ---- Discord/Slack-friendly markdown for Copy Challenge -----------------
+  // ---- Discord/Slack-friendly markdown table for Copy Challenge -----------
   function buildCurrentChallengeText() {
-    const lines = ["🎲 **FH6 Roulette Challenge**", ""];
-    CATEGORIES.forEach((cat) => {
-      const item = current[cat.key];
-      lines.push(`${cat.icon} **${cat.label}:** ${item ? item.name : "—"}`);
-    });
-    return lines.join("\n");
+    const rows = CATEGORIES.map((cat) => [cat.label, current[cat.key] ? current[cat.key].name : "—"]);
+    const col1 = Math.max("Category".length, ...rows.map((r) => r[0].length));
+    const col2 = Math.max("Result".length, ...rows.map((r) => r[1].length));
+    const pad = (s, w) => s + " ".repeat(w - s.length);
+    const lines = [pad("Category", col1) + "  " + pad("Result", col2), "-".repeat(col1) + "  " + "-".repeat(col2)];
+    rows.forEach((r) => lines.push(pad(r[0], col1) + "  " + r[1]));
+    return "🎲 **Forza Horizon 6 Roulette Challenge**\n\n```\n" + lines.join("\n") + "\n```";
   }
 
   // ---- settings toggles ---------------------------------------------------
@@ -548,12 +639,13 @@
 
   // ---- wire up global controls ----------------------------------------
   document.getElementById("spin-all").addEventListener("click", spinAll);
+  document.getElementById("reset-spin").addEventListener("click", resetSpin);
 
   document.getElementById("copy-challenge").addEventListener("click", async () => {
     const text = buildCurrentChallengeText();
     try {
       await navigator.clipboard.writeText(text);
-      showToast("Challenge copied - paste it right into Discord/Slack!");
+      showToast("Challenge copied as a Markdown table - paste it into Discord/Slack!");
     } catch (e) {
       showToast("Couldn't copy automatically - select and copy manually.");
     }
@@ -636,7 +728,6 @@
       btn.classList.toggle("active", btn.dataset.modalTab === tab);
     });
     if (!dataModalBuilt[tab]) {
-      dataModalBody.querySelectorAll(`[data-tab-panel="${tab}"]`).forEach((p) => p.remove());
       const wrap = document.createElement("div");
       wrap.dataset.tabPanel = tab;
       wrap.innerHTML = buildDataTable(tab);
@@ -669,14 +760,103 @@
   dataModal.addEventListener("click", (e) => {
     if (e.target === dataModal) dataModal.classList.add("hidden");
   });
-  document.querySelectorAll("[data-modal-tab]").forEach((btn) => {
+  document.querySelectorAll("#data-modal [data-modal-tab]").forEach((btn) => {
     btn.addEventListener("click", () => showDataTab(btn.dataset.modalTab));
   });
   dataSearch.addEventListener("input", (e) => filterDataTable(e.target.value));
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !dataModal.classList.contains("hidden")) {
-      dataModal.classList.add("hidden");
+
+  // ---- weights modal: visualize + manually adjust ------------------------
+  const weightsModal = document.getElementById("weights-modal");
+  const weightsBody = document.getElementById("weights-modal-body");
+  let weightsTab = "race";
+
+  function baseWeightList(catKey) {
+    // Base weight ignoring current cascade position and manual multipliers -
+    // "how rare is this option across the whole roster," not "right now."
+    const cat = categoryByKey[catKey];
+    if (catKey === "race") {
+      return cat.data.map((item) => ({ item, base: RACE_COUNTS_BY_TYPE.get(item.id) || 0 }));
     }
+    const field = CASCADE_CAR_FIELD[catKey];
+    const counts = new Map();
+    CARS.forEach((car) => {
+      const id = car[field];
+      counts.set(id, (counts.get(id) || 0) + 1);
+    });
+    return cat.data.map((item) => ({ item, base: counts.get(item.id) || 0 }));
+  }
+
+  function renderWeightsTab(tab) {
+    weightsTab = tab;
+    document.querySelectorAll("[data-weights-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.weightsTab === tab);
+    });
+    const cat = categoryByKey[tab];
+    const list = baseWeightList(tab).sort((a, b) => b.base - a.base || a.item.name.localeCompare(b.item.name));
+    const maxBase = Math.max(1, ...list.map((r) => r.base));
+
+    weightsBody.innerHTML = `
+      <div class="weights-toolbar">
+        <p>Bar length = how many ${tab === "race" ? "races" : "cars"} back that option. Slider = your own multiplier on top (1.0× = unchanged).</p>
+        <button type="button" class="btn btn-tiny" data-role="reset-tab-weights">Reset ${cat.label} to 1.0×</button>
+      </div>
+      <div class="weights-list">
+        ${list
+          .map((r) => {
+            const mult = multiplierFor(tab, r.item.id);
+            const pct = (r.base / maxBase) * 100;
+            return `
+            <div class="weight-row" data-item-id="${r.item.id}">
+              <span class="weight-name" title="${r.item.name}">${r.item.name}</span>
+              <span class="weight-bar-track"><span class="weight-bar-fill" style="width:${pct}%"></span></span>
+              <span class="weight-base">${r.base}</span>
+              <input type="range" class="weight-slider" min="0" max="3" step="0.1" value="${mult}" data-role="weight-slider">
+              <span class="weight-mult">${mult.toFixed(1)}×</span>
+            </div>`;
+          })
+          .join("")}
+      </div>
+    `;
+
+    weightsBody.querySelectorAll(".weight-row").forEach((row) => {
+      const id = row.dataset.itemId;
+      const slider = row.querySelector('[data-role="weight-slider"]');
+      const multLabel = row.querySelector(".weight-mult");
+      slider.addEventListener("input", () => {
+        const v = parseFloat(slider.value);
+        multipliers[tab][id] = v;
+        multLabel.textContent = `${v.toFixed(1)}×`;
+        persistMultipliers();
+        refreshAllCounts();
+      });
+    });
+
+    weightsBody.querySelector('[data-role="reset-tab-weights"]').addEventListener("click", () => {
+      multipliers[tab] = {};
+      persistMultipliers();
+      refreshAllCounts();
+      renderWeightsTab(tab);
+    });
+  }
+
+  document.getElementById("show-weights").addEventListener("click", () => {
+    weightsModal.classList.remove("hidden");
+    renderWeightsTab(weightsTab);
+  });
+  document.getElementById("weights-modal-close").addEventListener("click", () => {
+    weightsModal.classList.add("hidden");
+  });
+  weightsModal.addEventListener("click", (e) => {
+    if (e.target === weightsModal) weightsModal.classList.add("hidden");
+  });
+  document.querySelectorAll("#weights-modal [data-weights-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => renderWeightsTab(btn.dataset.weightsTab));
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!dataModal.classList.contains("hidden")) dataModal.classList.add("hidden");
+    if (!weightsModal.classList.contains("hidden")) weightsModal.classList.add("hidden");
   });
 
   // ---- init -------------------------------------------------------------
