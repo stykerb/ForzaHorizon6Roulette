@@ -25,6 +25,24 @@
 
     <div id="categories" class="grid"></div>
 
+    <section class="specific-race-section">
+      <div class="history-header">
+        <h2>Roll a Specific Race</h2>
+        <span class="card-count" id="specific-race-count"></span>
+      </div>
+      <p class="specific-race-note">
+        Pulls from the full FH6 race list, filtered by whichever Race Types are enabled in the
+        Race Type card's filters above.
+      </p>
+      <div class="card specific-race-card">
+        <div class="card-result" id="specific-race-result"><span class="placeholder">Spin to reveal</span></div>
+        <div class="card-sub" id="specific-race-sub"></div>
+        <div class="card-actions">
+          <button type="button" id="specific-race-spin" class="btn btn-spin">🎲 Spin</button>
+        </div>
+      </div>
+    </section>
+
     <section class="history-section">
       <div class="history-header">
         <h2>Challenge History</h2>
@@ -43,7 +61,8 @@
 
   <div id="toast" class="toast"></div>
 
-  <script src="data/races.js"></script>
+  <script src="data/raceTypes.js"></script>
+  <script src="data/individualRaces.js"></script>
   <script src="data/carTypes.js"></script>
   <script src="data/brands.js"></script>
   <script src="data/countries.js"></script>

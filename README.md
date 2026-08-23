@@ -4,7 +4,12 @@ A random challenge generator for **Forza Horizon 6**. Hit **Spin All** to get
 a random Race Type, Car Type, Brand, Country, Decade, and Performance Class —
 a full build/race challenge in one click. Each category can be spun on its
 own, and every category has a filter panel so you can exclude items you don't
-want in the pool (e.g. turn off "Kei Car" or lock the class to S1 only).
+want in the pool (e.g. turn off a car type or lock the class to S1 only).
+
+There's also a **Roll a Specific Race** section that picks one named race
+from the full FH6 race list (Street, Road, Touge, Drag, Dirt, Cross Country).
+It has no filter panel of its own — it reuses whatever's enabled/disabled in
+the Race Type card above it.
 
 No build step, no dependencies, no server required — it's plain HTML/CSS/JS.
 
@@ -22,15 +27,16 @@ Your filter choices and challenge history are saved in your browser's
 ## Project layout
 
 ```
-index.html         Page shell, loads data files then js/app.js
-css/styles.css      All styling
-js/app.js           App logic — rendering, spinning, filters, persistence
-data/races.js        Race / event types
-data/carTypes.js     Car body / build styles
-data/brands.js       Manufacturers (with country of origin)
-data/countries.js    Countries of origin
-data/decades.js      Model decades
-data/classes.js      Forza performance classes (D through X)
+index.html              Page shell, loads data files then js/app.js
+css/styles.css           All styling
+js/app.js                App logic — rendering, spinning, filters, persistence
+data/raceTypes.js         Race type categories (Road/Street/Touge/Drag/Dirt/Cross Country)
+data/individualRaces.js   Every named race, tagged with a raceTypes.js id
+data/carTypes.js          Car build/category types
+data/brands.js            Manufacturers (with country of origin)
+data/countries.js         Countries of origin
+data/decades.js           Model decades
+data/classes.js           Forza performance classes (D through X)
 ```
 
 `js/app.js` is entirely data-agnostic — it just reads whatever is in the
@@ -59,8 +65,9 @@ by `id`, so renaming one effectively "loses" that filter setting for anyone
 who already unchecked it. If a manufacturer or race is renamed in-game, keep
 the old `id` and just update the `name`.
 
-- `data/races.js` — `{ id, name, desc }`
-- `data/carTypes.js` — `{ id, name, desc }`
+- `data/raceTypes.js` — `{ id, name, desc }`
+- `data/individualRaces.js` — `{ id, name, typeId }` (`typeId` references an id in `data/raceTypes.js`; adding a brand-new race *type* — not just a new race — means adding it to `raceTypes.js` first)
+- `data/carTypes.js` — `{ id, name }`
 - `data/brands.js` — `{ id, name, country }` (`country` references an id in `data/countries.js`)
 - `data/countries.js` — `{ id, name }`
 - `data/decades.js` — `{ id, name }`
@@ -72,7 +79,7 @@ active pool without extra migration work.
 
 ## Notes on the starting data set
 
-The brand/race/car-type lists were seeded from Forza Horizon 6's launch
-roster (Japan setting, ~90 manufacturers, JDM-heavy) as of August 2026. It's
-a solid starting point but not guaranteed to be exhaustive — treat it as a
+The brand list (89 manufacturers), car type list, country list, performance
+classes (D–X, FH6's PI bands), and the full named-race list were captured
+directly from the in-game FH6 filters/roster as of August 2026. Treat it as a
 living document and update it as the game evolves.

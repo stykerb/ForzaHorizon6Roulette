@@ -14,7 +14,7 @@
   "use strict";
 
   const CATEGORIES = [
-    { key: "race", label: "Race Type", icon: "\u{1F3C1}", data: RACES },
+    { key: "race", label: "Race Type", icon: "\u{1F3C1}", data: RACE_TYPES },
     { key: "carType", label: "Car Type", icon: "\u{1F697}", data: CAR_TYPES },
     { key: "brand", label: "Brand", icon: "\u{1F3ED}", data: BRANDS, sub: (item) => countryName(item.country) },
     { key: "country", label: "Country", icon: "\u{1F30D}", data: COUNTRIES },
@@ -202,6 +202,10 @@
     const spinBtn = card.querySelector('[data-role="spin-one"]');
     spinBtn.disabled = enabled === 0;
     card.classList.toggle("empty-pool", enabled === 0);
+
+    // The specific-race pool is filtered by the Race Type card's filters,
+    // so keep its count/spin-state in sync whenever those change.
+    if (cat.key === "race") updateSpecificRaceCount();
   }
 
   function renderResult(cat) {
@@ -286,6 +290,60 @@
     });
   }
 
+  // ---- "Roll a Specific Race" section -----------------------------------
+  // Has no filter UI of its own - it reuses the Race Type card's
+  // disabledIds["race"] set, matched against each race's `typeId`.
+  const specificRaceEls = {
+    result: document.getElementById("specific-race-result"),
+    sub: document.getElementById("specific-race-sub"),
+    count: document.getElementById("specific-race-count"),
+    spinBtn: document.getElementById("specific-race-spin"),
+  };
+
+  function raceTypeName(typeId) {
+    const t = RACE_TYPES.find((x) => x.id === typeId);
+    return t ? t.name : typeId;
+  }
+
+  function specificRacePool() {
+    const disabled = new Set(disabledIds.race);
+    return INDIVIDUAL_RACES.filter((r) => !disabled.has(r.typeId));
+  }
+
+  function updateSpecificRaceCount() {
+    const total = INDIVIDUAL_RACES.length;
+    const enabled = specificRacePool().length;
+    specificRaceEls.count.textContent = `${enabled}/${total}`;
+    specificRaceEls.spinBtn.disabled = enabled === 0;
+  }
+
+  function renderSpecificRace() {
+    const race = current.specificRace;
+    if (!race) {
+      specificRaceEls.result.innerHTML = `<span class="placeholder">Spin to reveal</span>`;
+      specificRaceEls.sub.textContent = "";
+      return;
+    }
+    specificRaceEls.result.textContent = race.name;
+    specificRaceEls.sub.textContent = raceTypeName(race.typeId);
+  }
+
+  function spinSpecificRace() {
+    const pool = specificRacePool();
+    if (pool.length === 0) {
+      showToast("No race types enabled - check the Race Type card's filters.");
+      return;
+    }
+    current.specificRace = randomFrom(pool);
+    persistCurrent();
+    specificRaceEls.result.classList.remove("flash");
+    void specificRaceEls.result.offsetWidth;
+    specificRaceEls.result.classList.add("flash");
+    renderSpecificRace();
+  }
+
+  specificRaceEls.spinBtn.addEventListener("click", spinSpecificRace);
+
   function showToast(msg) {
     const toast = document.getElementById("toast");
     toast.textContent = msg;
@@ -295,7 +353,9 @@
   }
 
   function buildCurrentChallengeText() {
-    return CATEGORIES.map((cat) => `${cat.label}: ${current[cat.key] ? current[cat.key].name : "—"}`).join("\n");
+    const lines = CATEGORIES.map((cat) => `${cat.label}: ${current[cat.key] ? current[cat.key].name : "—"}`);
+    if (current.specificRace) lines.push(`Specific Race: ${current.specificRace.name}`);
+    return lines.join("\n");
   }
 
   // ---- wire up global controls ----------------------------------------
@@ -335,4 +395,6 @@
   // ---- init -------------------------------------------------------------
   CATEGORIES.forEach(buildCard);
   renderHistory();
+  renderSpecificRace();
+  updateSpecificRaceCount();
 })();

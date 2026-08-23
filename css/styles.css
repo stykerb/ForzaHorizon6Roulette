@@ -212,6 +212,15 @@ body {
 .filter-row:hover { background: var(--bg-alt); }
 .filter-row em { color: var(--text-dim); font-style: normal; font-size: 0.78rem; }
 
+.specific-race-section { margin-top: 2.5rem; }
+.specific-race-note {
+  margin: 0 0 0.9rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+.specific-race-card { max-width: 420px; }
+.specific-race-card .card-actions .btn { flex: none; padding-left: 1.4rem; padding-right: 1.4rem; }
+
 .history-section { margin-top: 2.5rem; }
 .history-header {
   display: flex;
