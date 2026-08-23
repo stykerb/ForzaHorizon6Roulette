@@ -1,13 +1,15 @@
 /**
  * data/decades.js
  * -----------------------------------------------------------------------
- * Car model decades that can be spun by the roulette.
+ * Car model decades that can be spun by the roulette. Every entry here
+ * needs at least one real car in data/cars.js backing it - an empty
+ * decade is a guaranteed dead end for anyone who filters down to it (see
+ * "1940s", deliberately omitted: no car in the roster is from 1940-1949).
  * See data/raceTypes.js for the "how to add an entry" instructions.
  * -----------------------------------------------------------------------
  */
 const DECADES = [
   { id: "1930s", name: "1930s" },
-  { id: "1940s", name: "1940s" },
   { id: "1950s", name: "1950s" },
   { id: "1960s", name: "1960s" },
   { id: "1970s", name: "1970s" },

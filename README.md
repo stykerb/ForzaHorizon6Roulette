@@ -45,24 +45,29 @@ is, just give me a Ferrari."
 ### The cascades never land on an impossible combo
 
 Car Type → Country → Brand → Decade → Performance Class, and Race Type →
-Specific Race, each roll in order. Every card's **count badge and "click to
-see options" popover are purely structural**: they only reflect what's
-rolled *above* that card plus its own filter — Car Type, first in its chain,
-always just shows how many of its own options are enabled, full stop, since
-nothing precedes it.
+Specific Race, each roll in order. Two different questions get asked of the
+same four car fields, on purpose:
 
-That structural simplicity means a card can still hit a dead end further
-down the chain (e.g. Country locked to "Austria" only, paired with a Car
-Type that happens to have zero Austria cars). Rather than making every
-card's *display* aware of every other card's filters, each chain is rolled
-with backtracking: hitting a dead end quietly retries the card that caused
-it with a different value until the whole chain resolves to a real,
-consistent combination — so what you see is simple, and what you get is
-always valid. Spinning any single card re-rolls everything downstream of it
-too (e.g. respinning Brand alone re-rolls Decade and Performance Class, but
-keeps Car Type and Country fixed; respinning Specific Race alone keeps the
-current Race Type fixed), so a solo respin always stays consistent with
-what's above it.
+- **What should this card's count badge / "click to see options" popover
+  show?** Purely structural — only what's rolled *above* that card plus its
+  own filter. Car Type, first in its chain, always just shows how many of
+  its own options are enabled, full stop, since nothing precedes it.
+- **What's actually safe to roll?** Every *other* card's filter counts,
+  regardless of roll order — so filtering Decade down to the 1960s also
+  keeps Car Type from ever rolling something with zero 1960s cars, even
+  though Car Type comes first and its badge doesn't reflect that filter.
+  Whatever gets picked is still cross-checked with backtracking (a dead end
+  quietly retries the card that caused it with a different value), so a
+  combination the filters make outright impossible surfaces as a clear "no
+  valid options" message instead of a silent failure.
+
+That split is deliberate: the display stays simple to read (a card's count
+means exactly what it looks like it means), while the actual spin is always
+safe regardless of which card's filter is doing the constraining. Spinning
+any single card re-rolls everything downstream of it too (e.g. respinning
+Brand alone re-rolls Decade and Performance Class, but keeps Car Type and
+Country fixed; respinning Specific Race alone keeps the current Race Type
+fixed), so a solo respin always stays consistent with what's above it.
 
 Performance Class works a little differently: it's not picked from a fixed
 list so much as computed from the stock class of whichever real cars match
@@ -161,6 +166,13 @@ most, since it directly drives which combos the cascade considers possible,
 what gets weighted toward, and what Performance Class options exist —
 double-check the make/type/country/class against the in-game car list before
 adding it.
+
+`data/decades.js` (and, in principle, any other cascading data file) should
+only ever list options with at least one real car behind them in
+`data/cars.js` — an empty one is a guaranteed dead end for anyone who
+filters down to it. `1940s` is deliberately absent for exactly this reason
+(no car in the roster is from 1940–1949); if a future update adds one, add
+the decade back.
 
 ## Notes on the starting data set
 

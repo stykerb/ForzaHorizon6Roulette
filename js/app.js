@@ -135,7 +135,20 @@
     return m === undefined || m === null ? 1 : m; // 0 is a valid, deliberate multiplier - don't fall back to 1 for it
   }
 
-  // ---- the car cascade (structural - only stages ABOVE matter) -----------
+  // ---- the car cascade ----------------------------------------------------
+  // Two different questions get asked of the same four fields:
+  //
+  // "What should this card's count badge / options popover show?" - purely
+  // structural, only stages ABOVE this one in roll order (their ROLLED
+  // value, never their filter). Car Type, first in its chain, is always
+  // just its own filter's count - nothing precedes it.
+  //
+  // "What's actually safe to roll for this card?" - every OTHER stage's
+  // filter (and rolled value, once it has one) applies, regardless of roll
+  // order, so a filter set on a card further down the chain (e.g. Decade
+  // locked to the 1960s) rules out upstream picks (a Car Type with zero
+  // 1960s cars) that could only ever dead-end. This is what the actual
+  // spin uses - see spinPoolFor / rollChain below.
   function carsMatchingUpTo(stageKey) {
     const idx = stageKey === "class" ? CASCADE_ORDER.length : CASCADE_ORDER.indexOf(stageKey);
     return CARS.filter((car) => {
@@ -143,6 +156,24 @@
         const key = CASCADE_ORDER[i];
         const sel = current[key];
         if (sel && !isAny(sel) && car[CASCADE_CAR_FIELD[key]] !== sel.id) return false;
+      }
+      return true;
+    });
+  }
+
+  function carsSatisfyingAllExcept(excludeKey) {
+    const disabledSets = {};
+    CASCADE_ORDER.forEach((key) => {
+      disabledSets[key] = new Set(disabledIds[key]);
+    });
+    return CARS.filter((car) => {
+      for (let i = 0; i < CASCADE_ORDER.length; i++) {
+        const key = CASCADE_ORDER[i];
+        if (key === excludeKey) continue;
+        const field = CASCADE_CAR_FIELD[key];
+        if (disabledSets[key].has(car[field])) return false;
+        const sel = current[key];
+        if (sel && !isAny(sel) && car[field] !== sel.id) return false;
       }
       return true;
     });
@@ -178,17 +209,20 @@
   }
 
   // ---- pools: {item, weight, base}[] of REAL (non-Any) options ------------
-  function realPoolFor(cat) {
+  // matchingCarsFn is carsMatchingUpTo for the structural/display pool, or
+  // carsSatisfyingAllExcept for the joint/spin-safe pool - see the comment
+  // above carsMatchingUpTo for what each means.
+  function poolForStage(cat, matchingCarsFn) {
     if (cat.key === "class") {
       const disabled = new Set(disabledIds.class);
-      const matchingCars = carsMatchingUpTo("class");
+      const matchingCars = matchingCarsFn("class");
       const legalIds = new Set(computeLegalClassIds(matchingCars));
       return PERFORMANCE_CLASSES.filter((item) => legalIds.has(item.id) && !disabled.has(item.id)).map((item) => ({ item, weight: 1, base: 1 }));
     }
 
     if (CASCADE_ORDER.indexOf(cat.key) !== -1) {
       const disabled = new Set(disabledIds[cat.key]);
-      const matchingCars = carsMatchingUpTo(cat.key);
+      const matchingCars = matchingCarsFn(cat.key);
       const field = CASCADE_CAR_FIELD[cat.key];
       const counts = new Map();
       matchingCars.forEach((car) => {
@@ -218,15 +252,30 @@
     return cat.data.filter((item) => !disabled.has(item.id)).map((item) => ({ item, weight: 1, base: 1 }));
   }
 
-  // Full pool including "Any". Skipped when Strict Mode is on, the category
-  // doesn't allow it, or there's only one real option (Any would be
-  // redundant with it). Any's weight is the pool's average, so it reads as
-  // "about as likely as a typical option" rather than dominating/vanishing.
-  function fullPool(cat) {
-    const real = realPoolFor(cat);
+  // Structural pool - what a card's count badge and options popover show.
+  function realPoolFor(cat) {
+    return poolForStage(cat, carsMatchingUpTo);
+  }
+
+  // Joint pool - what the actual roll draws from, so a filter set anywhere
+  // in the chain (not just above this card) keeps a dead end from ever
+  // being picked in the first place.
+  function spinPoolFor(cat) {
+    return poolForStage(cat, carsSatisfyingAllExcept);
+  }
+
+  // Injects "Any" into a real pool. Skipped when Strict Mode is on, the
+  // category doesn't allow it, or there's only one real option (Any would
+  // be redundant with it). Any's weight is the pool's average, so it reads
+  // as "about as likely as a typical option" rather than dominating/vanishing.
+  function injectAny(real, cat) {
     if (!cat.allowAny || strictMode || real.length <= 1) return real;
     const totalWeight = real.reduce((sum, r) => sum + r.weight, 0);
     return [...real, { item: ANY, weight: totalWeight / real.length, base: null }];
+  }
+
+  function spinFullPool(cat) {
+    return injectAny(spinPoolFor(cat), cat);
   }
 
   function weightedRandom(pool) {
@@ -269,7 +318,7 @@
 
       for (;;) {
         if (++attempts > MAX_ATTEMPTS) return false;
-        const pool = fullPool(cat).filter((p) => !excludeSets[key].has(p.item.id));
+        const pool = spinFullPool(cat).filter((p) => !excludeSets[key].has(p.item.id));
         if (pool.length === 0) {
           current[key] = null;
           return false;
