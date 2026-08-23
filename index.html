@@ -21,26 +21,35 @@
       <button type="button" id="spin-all" class="btn btn-primary btn-big">🎲 SPIN ALL</button>
       <button type="button" id="copy-challenge" class="btn">📋 Copy Challenge</button>
       <button type="button" id="reset-filters" class="btn">↺ Reset Filters</button>
+      <button type="button" id="show-data-table" class="btn">📊 Show Data</button>
     </div>
 
-    <div id="categories" class="grid"></div>
+    <div class="settings-bar">
+      <label class="toggle-switch">
+        <input type="checkbox" id="weighted-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Weighted by rarity <em>(more cars = picked more often)</em></span>
+      </label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="strict-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Strict mode <em>(never roll "Any")</em></span>
+      </label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="stock-only-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Stock cars only <em>(Performance Class - no tuning headroom)</em></span>
+      </label>
+    </div>
 
-    <section class="specific-race-section">
-      <div class="history-header">
-        <h2>Roll a Specific Race</h2>
-        <span class="card-count" id="specific-race-count"></span>
-      </div>
-      <p class="specific-race-note">
-        Pulls from the full FH6 race list, filtered by whichever Race Types are enabled in the
-        Race Type card's filters above.
-      </p>
-      <div class="card specific-race-card">
-        <div class="card-result" id="specific-race-result"><span class="placeholder">Spin to reveal</span></div>
-        <div class="card-sub" id="specific-race-sub"></div>
-        <div class="card-actions">
-          <button type="button" id="specific-race-spin" class="btn btn-spin">🎲 Spin</button>
-        </div>
-      </div>
+    <section class="group-section">
+      <h2 class="group-heading">🏁 Race</h2>
+      <div id="race-categories" class="grid"></div>
+    </section>
+
+    <section class="group-section">
+      <h2 class="group-heading">🚗 Car Build</h2>
+      <div id="car-categories" class="grid"></div>
     </section>
 
     <section class="history-section">
@@ -52,14 +61,22 @@
     </section>
   </main>
 
-  <footer class="site-footer">
-    <p>
-      Data lives in <code>/data</code> as plain JS files — ask to add new brands, races,
-      or classes any time a game update ships, and they'll be added there.
-    </p>
-  </footer>
-
   <div id="toast" class="toast"></div>
+
+  <div id="data-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>FH6 Data Browser</h2>
+        <button type="button" id="data-modal-close" class="btn btn-tiny">✕ Close</button>
+      </div>
+      <div class="modal-tabs">
+        <button type="button" class="modal-tab active" data-modal-tab="cars">Cars (636)</button>
+        <button type="button" class="modal-tab" data-modal-tab="races">Races (81)</button>
+      </div>
+      <input type="search" id="data-modal-search" class="filter-search modal-search" placeholder="Search...">
+      <div id="data-modal-body" class="modal-body"></div>
+    </div>
+  </div>
 
   <script src="data/raceTypes.js"></script>
   <script src="data/individualRaces.js"></script>
@@ -68,6 +85,7 @@
   <script src="data/countries.js"></script>
   <script src="data/decades.js"></script>
   <script src="data/classes.js"></script>
+  <script src="data/seasons.js"></script>
   <script src="data/cars.js"></script>
   <script src="js/app.js"></script>
 </body>

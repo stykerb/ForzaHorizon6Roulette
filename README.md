@@ -1,38 +1,13 @@
 # FH6 Roulette
 
 A random challenge generator for **Forza Horizon 6**. Hit **Spin All** to get
-a random Race Type, Car Type, Brand, Country, Decade, and Performance Class —
-a full build/race challenge in one click. Each category can be spun on its
-own, and every category has a filter panel so you can exclude items you don't
-want in the pool (e.g. turn off a car type or lock the class to S1 only).
-
-There's also a **Roll a Specific Race** section that picks one named race
-from the full FH6 race list (Street, Road, Touge, Drag, Dirt, Cross Country).
-It has no filter panel of its own — it reuses whatever's enabled/disabled in
-the Race Type card above it. On **Spin All** it's locked to the *exact* Race
-Type that spin just rolled, rather than the broader enabled-types pool a
-manual click on its own Spin button uses.
-
-### The car cascade never lands on an impossible combo
-
-Car Type → Country → Brand → Decade → Performance Class roll as a chain, each
-stage ruling out anything that isn't backed by a real car in
-`data/cars.js` (FH6's full 636-car roster) given everything rolled before it —
-so you'll never get, say, a German Kei Car or a 2020s Classic Muscle car.
-Spinning any single card in that chain (not just Spin All) re-rolls
-everything downstream of it too, so the result is always consistent.
-
-Performance Class works a little differently: it's not picked from a fixed
-list so much as computed from the stock class of whichever real cars match
-the roll so far. Cars can be tuned *up*, never down, so:
-- classes below the lowest-PI stock car in that matching pool are ruled out;
-- every car can be tuned up to at least S2;
-- reaching **R** needs a stock S2-or-higher car in the matching pool;
-- reaching **X** needs a stock R-or-higher car in the matching pool.
-
-Check **Stock cars only** on the Performance Class card to turn this tuning
-headroom off entirely — it'll only offer classes a matching car actually
-ships in.
+a random Race Type, Specific Race, Season, Car Type, Country, Brand, Decade,
+and Performance Class — a full build/race challenge in one click. Every
+category (except Performance Class) can also roll **Any**, a wildcard meaning
+"no constraint here." Cards are grouped into a **Race** section (Race Type,
+Specific Race, Season) and a **Car Build** section (Car Type, Country, Brand,
+Decade, Performance Class), each with its own filter panel so you can exclude
+items you don't want in the pool.
 
 No build step, no dependencies, no server required — it's plain HTML/CSS/JS.
 
@@ -44,8 +19,55 @@ included in `.github/workflows/deploy.yml` — enable Pages for this repo
 ("Source: GitHub Actions") and it will publish automatically on pushes to
 `main`.
 
-Your filter choices and challenge history are saved in your browser's
-`localStorage`, so they persist between visits on the same device/browser.
+Your filter choices, settings, and challenge history are saved in your
+browser's `localStorage`, so they persist between visits on the same
+device/browser.
+
+### The three settings toggles
+
+- **Weighted by rarity** (on by default) — Car Type, Country, Brand, and
+  Decade are picked in proportion to how many real cars back each option, so
+  e.g. USA (~200+ cars) comes up far more than Croatia (1 car). Turn it off
+  for "truly random" equal odds across every enabled option instead.
+- **Strict mode** (off by default) — stops "Any" from ever being rolled.
+- **Stock cars only** (off by default) — turns off Performance Class's tuning
+  headroom (see below), so it only offers classes a matching car actually
+  ships in.
+
+### The car cascade never lands on an impossible combo
+
+Car Type → Country → Brand → Decade → Performance Class are resolved
+*jointly*, not just left-to-right: every stage's pool is only the options
+backed by a real car in `data/cars.js` (FH6's full 636-car roster) that's
+*also* consistent with every other stage's current filters and rolled value —
+so a narrow filter on one card (say, Country locked to "Austria" only) can
+never leave another card (Car Type) with no legal options. Spinning any
+single card re-rolls everything downstream of it too (e.g. respinning Brand
+alone re-rolls Decade and Performance Class, but keeps Car Type and Country
+fixed), so the result is always consistent with what's above it.
+
+Performance Class works a little differently: it's not picked from a fixed
+list so much as computed from the stock class of whichever real cars match
+the roll so far. Cars can be tuned *up*, never down, so:
+- classes below the lowest-PI stock car in that matching pool are ruled out;
+- every car can be tuned up to at least S2;
+- reaching **R** needs a stock S2-or-higher car in the matching pool;
+- reaching **X** needs a stock R-or-higher car in the matching pool.
+
+The **Specific Race** card follows the same idea on a smaller scale: it locks
+to the exact Race Type shown above it once one's rolled (respinning Specific
+Race alone keeps that Race Type fixed), and otherwise pulls from every
+enabled Race Type.
+
+### Copy Challenge
+
+Copies the current roll as Discord/Slack-friendly Markdown (bold labels +
+emoji) — paste it straight into a chat.
+
+### Show Data
+
+Opens a searchable browser of every car (636) and every race (81) FH6 Roulette
+knows about, straight from `data/cars.js` and `data/individualRaces.js`.
 
 ## Project layout
 
@@ -60,6 +82,7 @@ data/brands.js            Manufacturers (with country of origin)
 data/countries.js         Countries of origin
 data/decades.js           Model decades
 data/classes.js           Forza performance classes (D through X)
+data/seasons.js            Festival seasons
 data/cars.js               The full FH6 car roster (stock config) - powers the cascade
 ```
 
@@ -96,6 +119,7 @@ the old `id` and just update the `name`.
 - `data/countries.js` — `{ id, name }`
 - `data/decades.js` — `{ id, name }`
 - `data/classes.js` — `{ id, name, pi, color }`
+- `data/seasons.js` — `{ id, name }`
 - `data/cars.js` — `{ id, name, make, type, country, year, decade, class, pi }` — `make`/`type`/`country`/`decade`/`class` each reference an id in the file of the matching name above; `pi` is the car's **stock** Performance Index
 
 New items you add are **enabled by default** for everyone — the app only
@@ -103,7 +127,8 @@ persists which items are *disabled*, so anything new automatically joins the
 active pool without extra migration work.
 
 Adding a new car to `data/cars.js` is the one case where accuracy matters
-most, since it directly drives which combos the cascade considers possible —
+most, since it directly drives which combos the cascade considers possible,
+what gets weighted toward, and what Performance Class options exist —
 double-check the make/type/country/class against the in-game car list before
 adding it.
 
