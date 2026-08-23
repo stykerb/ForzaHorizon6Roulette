@@ -18,12 +18,18 @@
 
   <main class="wrap">
     <div class="global-actions">
-      <button type="button" id="spin-all" class="btn btn-primary btn-big">🎲 SPIN ALL</button>
-      <button type="button" id="reset-spin" class="btn">🧹 Reset Spin</button>
-      <button type="button" id="copy-challenge" class="btn">📋 Copy Challenge</button>
-      <button type="button" id="reset-filters" class="btn">↺ Reset Filters</button>
-      <button type="button" id="show-weights" class="btn">⚖️ Weights</button>
-      <button type="button" id="show-data-table" class="btn">📊 Show Data</button>
+      <div class="actions-left">
+        <button type="button" id="reset-spin" class="btn">🧹 Reset Spin</button>
+        <button type="button" id="reset-filters" class="btn">↺ Reset Filters</button>
+      </div>
+      <div class="actions-center">
+        <button type="button" id="spin-all" class="btn btn-primary btn-big">🎲 SPIN ALL</button>
+        <button type="button" id="copy-challenge" class="btn">📋 Copy Challenge</button>
+      </div>
+      <div class="actions-right">
+        <button type="button" id="show-weights" class="btn">⚖️ Weights</button>
+        <button type="button" id="show-data-table" class="btn">📊 Show Data</button>
+      </div>
     </div>
 
     <div class="settings-bar">
@@ -42,7 +48,18 @@
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
         <span class="toggle-label">Stock cars only <em>(Performance Class - no tuning headroom)</em></span>
       </label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="exclude-long-tracks-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Exclude Long Tracks <em>(The Titan, The Gauntlet, The Colossus, The Goliath)</em></span>
+      </label>
     </div>
+
+    <section class="group-section preset-section">
+      <h2 class="group-heading">🎨 Preset Filters</h2>
+      <p class="preset-intro">Each preset fully replaces your current filters with its own theme. Hover a preset for details.</p>
+      <div id="preset-filters" class="preset-filters"></div>
+    </section>
 
     <section class="group-section">
       <h2 class="group-heading">🏁 Race</h2>

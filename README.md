@@ -3,13 +3,23 @@
 A random challenge generator for **Forza Horizon 6**. Hit **Spin All** to get
 a random Race Type, Specific Race, Season, Car Type, Country, Brand, Decade,
 and Performance Class — a full build/race challenge in one click. Every
-category (except Performance Class) can also roll **Any**, a wildcard meaning
-"no constraint here." Cards are grouped into a **Race** section (Race Type,
-Specific Race, Season) and a **Car Build** section (Car Type, Country, Brand,
-Decade, Performance Class), each with its own filter panel so you can exclude
-items you don't want in the pool, a count badge you can click to see exactly
-what's possible right now, and (except Performance Class) a per-card toggle
-to always land on "Any."
+category except Race Type and Performance Class can also roll **Any**, a
+wildcard meaning "no constraint here" (Race Type skips it because every real
+race already has a type, so "any type" doesn't map to anything concrete).
+Cards are grouped into a **Race** section (Race Type, Specific Race, Season)
+and a **Car Build** section (Car Type, Country, Brand, Decade, Performance
+Class), each with its own filter panel so you can exclude items you don't
+want in the pool, a count badge you can click to see exactly what's possible
+right now, and (where Any applies) a per-card toggle to always land on "Any."
+
+New visitors start with Drag Racing off by default in the Race Type filter
+(it's a jarring thing to spin into unannounced) — once you've touched any
+filter, your own choices take over.
+
+A row of **Preset Filters** (Murica, Euro, JDM, Race Cars, Off Road, Street
+Gang, Weirdos) sits above the Race section — each fully replaces your current
+filters with a themed set in one click; hover a preset to see exactly what it
+does.
 
 No build step, no dependencies, no server required — it's plain HTML/CSS/JS.
 
@@ -25,7 +35,7 @@ Your filter choices, settings, weight adjustments, and challenge history are
 saved in your browser's `localStorage`, so they persist between visits on the
 same device/browser.
 
-### The three settings toggles
+### The four settings toggles
 
 - **Weighted by rarity** (on by default) — Race Type, Car Type, Country,
   Brand, and Decade are picked in proportion to how many real races/cars back
@@ -36,6 +46,9 @@ same device/browser.
 - **Stock cars only** (off by default) — turns off Performance Class's tuning
   headroom (see below), so it only offers classes a matching car actually
   ships in.
+- **Exclude Long Tracks** (off by default) — removes FH6's four ultra-long
+  signature races (The Titan, The Gauntlet, The Colossus, The Goliath) from
+  the Specific Race pool.
 
 Each card also has its own **🎯 Always land on "Any"** toggle, which pins
 that one card to Any on every spin (Spin All or its own Spin button) —
@@ -76,6 +89,14 @@ the roll so far. Cars can be tuned *up*, never down, so:
 - every car can be tuned up to at least S2;
 - reaching **R** needs a stock S2-or-higher car in the matching pool;
 - reaching **X** needs a stock R-or-higher car in the matching pool.
+
+### Colors
+
+Race Type, Specific Race, Season, and Performance Class results are colored
+to match FH6's own in-game HUD colors for each (`color` in `data/raceTypes.js`,
+`data/seasons.js`, and `data/classes.js`). Specific Race takes its color from
+whichever Race Type it belongs to. Drag Racing uses a plain red rather than
+its in-game pink, kept deliberately distinct from Dirt Racing's orange.
 
 ### Adjust Weights
 
@@ -147,15 +168,20 @@ effectively "loses" those settings for anyone who already customized them.
 If a manufacturer or race is renamed in-game, keep the old `id` and just
 update the `name`.
 
-- `data/raceTypes.js` — `{ id, name, desc }`
+- `data/raceTypes.js` — `{ id, name, desc, color }` (`color` should match the in-game category color; road/dirt/cross-country's two ids each share one color, same as in-game)
 - `data/individualRaces.js` — `{ id, name, typeId }` (`typeId` references an id in `data/raceTypes.js`; adding a brand-new race *type* — not just a new race — means adding it to `raceTypes.js` first)
 - `data/carTypes.js` — `{ id, name }`
 - `data/brands.js` — `{ id, name, country }` (`country` references an id in `data/countries.js`)
 - `data/countries.js` — `{ id, name }`
 - `data/decades.js` — `{ id, name }`
 - `data/classes.js` — `{ id, name, pi, color }`
-- `data/seasons.js` — `{ id, name }`
+- `data/seasons.js` — `{ id, name, color }`
 - `data/cars.js` — `{ id, name, make, type, country, year, decade, class, pi }` — `make`/`type`/`country`/`decade`/`class` each reference an id in the file of the matching name above; `pi` is the car's **stock** Performance Index
+
+Adding a race whose `id` is one of `the-titan`, `the-gauntlet`, `the-colossus`,
+`the-goliath` (in `js/app.js`'s `LONG_TRACK_IDS`) makes it subject to the
+Exclude Long Tracks toggle; that list is intentionally hardcoded rather than
+data-driven since it names four specific, unlikely-to-change races.
 
 New items you add are **enabled by default** for everyone — the app only
 persists which items are *disabled*, so anything new automatically joins the

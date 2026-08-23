@@ -32,10 +32,16 @@
   const CASCADE_ORDER = ["carType", "country", "brand", "decade"];
   const CASCADE_CAR_FIELD = { carType: "type", country: "country", brand: "make", decade: "decade" };
 
+  function raceTypeColor(typeId) {
+    const t = RACE_TYPES.find((x) => x.id === typeId);
+    return t ? t.color : "";
+  }
+
   const CATEGORIES = [
-    { key: "race", label: "Race Type", icon: "\u{1F3C1}", data: RACE_TYPES, group: "race", allowAny: true, weightable: true },
-    { key: "specificRace", label: "Specific Race", icon: "\u{1F5FA}️", data: INDIVIDUAL_RACES, group: "race", allowAny: true, weightable: false, noFilter: true, note: "Locked to the Race Type above once it's rolled - otherwise pulls from every enabled Race Type." },
-    { key: "season", label: "Season", icon: "\u{1F324}️", data: SEASONS, group: "race", allowAny: true, weightable: false },
+    // No "Any" here - every individual race has a real type, so "any race type" doesn't map to anything concrete.
+    { key: "race", label: "Race Type", icon: "\u{1F3C1}", data: RACE_TYPES, group: "race", allowAny: false, weightable: true, color: (item) => item.color },
+    { key: "specificRace", label: "Specific Race", icon: "\u{1F5FA}️", data: INDIVIDUAL_RACES, group: "race", allowAny: true, weightable: false, noFilter: true, note: "Locked to the Race Type above once it's rolled - otherwise pulls from every enabled Race Type.", color: (item) => (item.id === ANY.id ? "" : raceTypeColor(item.typeId)) },
+    { key: "season", label: "Season", icon: "\u{1F324}️", data: SEASONS, group: "race", allowAny: true, weightable: false, color: (item) => (item.id === ANY.id ? "" : item.color) },
     { key: "carType", label: "Car Type", icon: "\u{1F697}", data: CAR_TYPES, group: "car", allowAny: true, weightable: true },
     { key: "country", label: "Country", icon: "\u{1F30D}", data: COUNTRIES, group: "car", allowAny: true, weightable: true },
     { key: "brand", label: "Brand", icon: "\u{1F3ED}", data: BRANDS, group: "car", allowAny: true, weightable: true, sub: (item) => (item.id === ANY.id ? "" : countryName(item.country)) },
@@ -54,12 +60,16 @@
   const RACE_COUNTS_BY_TYPE = new Map();
   INDIVIDUAL_RACES.forEach((r) => RACE_COUNTS_BY_TYPE.set(r.typeId, (RACE_COUNTS_BY_TYPE.get(r.typeId) || 0) + 1));
 
+  // The four ultra-long signature races - excludable as a group via one toggle.
+  const LONG_TRACK_IDS = new Set(["the-titan", "the-gauntlet", "the-colossus", "the-goliath"]);
+
   const LS_FILTERS = "fh6r-disabled-ids-v2";
   const LS_HISTORY = "fh6r-history-v2";
   const LS_CURRENT = "fh6r-current-v2";
   const LS_STOCK_ONLY = "fh6r-stock-only-v1";
   const LS_WEIGHTED = "fh6r-weighted-v1";
   const LS_STRICT = "fh6r-strict-v1";
+  const LS_EXCLUDE_LONG_TRACKS = "fh6r-exclude-long-tracks-v1";
   const LS_ALWAYS_ANY = "fh6r-always-any-v1";
   const LS_MULTIPLIERS = "fh6r-weight-multipliers-v1";
   const MAX_HISTORY = 30;
@@ -91,16 +101,22 @@
     }
   }
 
+  // Brand-new visitors (nothing saved yet) start with Drag Racing off - it's
+  // a jarring default to spin into unannounced. Returning visitors keep
+  // whatever they've since chosen, including deliberately re-enabling it.
+  const isFirstVisit = localStorage.getItem(LS_FILTERS) === null;
   const disabledIds = loadJSON(LS_FILTERS, {});
   CATEGORIES.forEach((c) => {
     if (!disabledIds[c.key]) disabledIds[c.key] = [];
   });
+  if (isFirstVisit) disabledIds.race = ["drag-racing"];
 
   let history = loadJSON(LS_HISTORY, []);
   let current = loadJSON(LS_CURRENT, {});
   let stockOnly = loadJSON(LS_STOCK_ONLY, false);
   let weighted = loadJSON(LS_WEIGHTED, true);
   let strictMode = loadJSON(LS_STRICT, false);
+  let excludeLongTracks = loadJSON(LS_EXCLUDE_LONG_TRACKS, false);
   let alwaysAny = loadJSON(LS_ALWAYS_ANY, {});
   let multipliers = loadJSON(LS_MULTIPLIERS, {}); // { carType: {id: mult}, ... }
   WEIGHTABLE_KEYS.forEach((k) => {
@@ -120,6 +136,7 @@
     saveJSON(LS_STOCK_ONLY, stockOnly);
     saveJSON(LS_WEIGHTED, weighted);
     saveJSON(LS_STRICT, strictMode);
+    saveJSON(LS_EXCLUDE_LONG_TRACKS, excludeLongTracks);
     saveJSON(LS_ALWAYS_ANY, alwaysAny);
   }
   function persistMultipliers() {
@@ -237,7 +254,9 @@
     if (cat.key === "specificRace") {
       const disabled = new Set(disabledIds.race); // reuses the Race Type card's filter
       const raceSel = current.race;
-      return INDIVIDUAL_RACES.filter((r) => !disabled.has(r.typeId) && (!raceSel || isAny(raceSel) || r.typeId === raceSel.id)).map((item) => ({ item, weight: 1, base: 1 }));
+      return INDIVIDUAL_RACES.filter(
+        (r) => !disabled.has(r.typeId) && (!excludeLongTracks || !LONG_TRACK_IDS.has(r.id)) && (!raceSel || isAny(raceSel) || r.typeId === raceSel.id)
+      ).map((item) => ({ item, weight: 1, base: 1 }));
     }
 
     if (cat.key === "race") {
@@ -685,6 +704,11 @@
     () => stockOnly,
     (v) => (stockOnly = v)
   );
+  wireToggle(
+    "exclude-long-tracks-toggle",
+    () => excludeLongTracks,
+    (v) => (excludeLongTracks = v)
+  );
 
   // ---- wire up global controls ----------------------------------------
   document.getElementById("spin-all").addEventListener("click", spinAll);
@@ -719,6 +743,130 @@
     });
     refreshAllCounts();
     showToast("Filters reset.");
+  });
+
+  // ---- preset filters -------------------------------------------------
+  // Each preset is a full reset followed by a specific set of restrictions -
+  // applying one is always idempotent regardless of whatever filters were
+  // set before. Every preset excludes Drag Racing unless it says otherwise
+  // (only Murica includes it).
+  function resetAllFilters() {
+    CATEGORIES.forEach((cat) => {
+      disabledIds[cat.key] = [];
+    });
+  }
+  function enableOnly(catKey, enabledIdList) {
+    const cat = categoryByKey[catKey];
+    const keep = new Set(enabledIdList);
+    disabledIds[catKey] = cat.data.filter((item) => !keep.has(item.id)).map((item) => item.id);
+  }
+  function disableSome(catKey, idsToDisable) {
+    const set = new Set(disabledIds[catKey]);
+    idsToDisable.forEach((id) => set.add(id));
+    disabledIds[catKey] = Array.from(set);
+  }
+  const NO_DRAG = ["drag-racing"];
+
+  const PRESETS = [
+    {
+      id: "murica",
+      label: "🦅 Murica",
+      tooltip: "USA, Canada & Australian cars. No Touge. Drag races included.",
+      apply: () => {
+        enableOnly("country", ["usa", "canada", "australia"]);
+        disableSome("race", ["touge-battle"]);
+      },
+    },
+    {
+      id: "euro",
+      label: "🇪🇺 Euro",
+      tooltip: "European country cars only. No Drag races.",
+      apply: () => {
+        enableOnly("country", ["austria", "croatia", "denmark", "france", "germany", "italy", "sweden", "uk"]);
+        disableSome("race", NO_DRAG);
+      },
+    },
+    {
+      id: "jdm",
+      label: "🎌 JDM",
+      tooltip: "Japanese cars only. No Drag races.",
+      apply: () => {
+        enableOnly("country", ["japan"]);
+        disableSome("race", NO_DRAG);
+      },
+    },
+    {
+      id: "race-cars",
+      label: "🏆 Race Cars",
+      tooltip: "Track Toys, Extreme Track Toys & Hypercars. Road and Street races only. S1 and up. No Drag races.",
+      apply: () => {
+        enableOnly("carType", ["track-toys", "extreme-track-toys", "hypercars"]);
+        enableOnly("race", ["road-circuit", "road-sprint", "street-racing"]);
+        enableOnly("class", ["s1", "s2", "r", "x"]);
+      },
+    },
+    {
+      id: "off-road",
+      label: "🏜️ Off Road",
+      tooltip: "Buggies, Offroad, Rally, Utility Hero & UTV car types. Dirt and Cross Country races only. No Drag races.",
+      apply: () => {
+        enableOnly("carType", ["buggies", "unlimited-buggies", "offroad", "unlimited-offroad", "classic-rally", "modern-rally", "retro-rally", "rally-monsters", "utility-heroes", "sports-utility-heroes", "utvs"]);
+        enableOnly("race", ["dirt-trail", "dirt-scramble", "cross-country", "cross-country-circuit"]);
+      },
+    },
+    {
+      id: "street-gang",
+      label: "🌃 Street Gang",
+      tooltip: "Road, Street & Touge races. Excludes Buggies, Muscle, Racers, Track Toys, Rare Classics, Pickups/4x4's, Offroad, Utility Hero & UTV car types. No Drag races.",
+      apply: () => {
+        enableOnly("race", ["road-circuit", "road-sprint", "street-racing", "touge-battle"]);
+        disableSome("carType", [
+          "buggies", "unlimited-buggies",
+          "classic-muscle", "modern-muscle", "retro-muscle",
+          "classic-racers", "retro-racers",
+          "track-toys", "extreme-track-toys",
+          "rare-classics", "pickups-4x4s",
+          "offroad", "unlimited-offroad",
+          "utility-heroes", "sports-utility-heroes",
+          "utvs",
+        ]);
+      },
+    },
+    {
+      id: "weirdos",
+      label: "🤪 Weirdos",
+      tooltip: "Buggies, Classic variants, Cult Cars, Drift Cars, Eclectic Domestics, UTVs, Rare Classics & Racer car types. No Drag races.",
+      apply: () => {
+        enableOnly("carType", [
+          "buggies", "unlimited-buggies",
+          "classic-muscle", "classic-racers", "classic-rally", "classic-sports-cars",
+          "cult-cars", "drift-cars", "eclectic-domestics", "utvs", "rare-classics", "retro-racers",
+        ]);
+        disableSome("race", NO_DRAG);
+      },
+    },
+  ];
+
+  function applyPreset(preset) {
+    resetAllFilters();
+    preset.apply();
+    persistFilters();
+    CATEGORIES.forEach((cat) => {
+      if (!cat.noFilter) renderFilterList(cat);
+    });
+    refreshAllCounts();
+    showToast(`Preset applied: ${preset.label.replace(/^\S+\s/, "")}`);
+  }
+
+  const presetBar = document.getElementById("preset-filters");
+  PRESETS.forEach((preset) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn preset-btn";
+    btn.textContent = preset.label;
+    btn.dataset.tooltip = preset.tooltip;
+    btn.addEventListener("click", () => applyPreset(preset));
+    presetBar.appendChild(btn);
   });
 
   // ---- data browser modal --------------------------------------------

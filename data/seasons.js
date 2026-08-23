@@ -8,10 +8,10 @@
  * -----------------------------------------------------------------------
  */
 const SEASONS = [
-  { id: "spring", name: "Spring" },
-  { id: "summer", name: "Summer" },
-  { id: "autumn", name: "Autumn" },
-  { id: "winter", name: "Winter" },
+  { id: "spring", name: "Spring", color: "#8bc34a" },
+  { id: "summer", name: "Summer", color: "#ff9800" },
+  { id: "autumn", name: "Autumn", color: "#8b5a2b" },
+  { id: "winter", name: "Winter", color: "#7ec8e3" },
 ];
 
 if (typeof module !== "undefined" && module.exports) module.exports = SEASONS;
