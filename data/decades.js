@@ -2,10 +2,11 @@
  * data/decades.js
  * -----------------------------------------------------------------------
  * Car model decades that can be spun by the roulette.
- * See data/races.js for the "how to add an entry" instructions.
+ * See data/raceTypes.js for the "how to add an entry" instructions.
  * -----------------------------------------------------------------------
  */
 const DECADES = [
+  { id: "1930s", name: "1930s" },
   { id: "1940s", name: "1940s" },
   { id: "1950s", name: "1950s" },
   { id: "1960s", name: "1960s" },

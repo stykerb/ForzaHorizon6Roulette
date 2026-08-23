@@ -169,6 +169,18 @@ body {
 }
 .card-actions .btn { flex: 1; }
 
+.stock-only-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1.3;
+}
+.stock-only-toggle input { margin-top: 0.15rem; flex-shrink: 0; }
+.stock-only-toggle em { font-style: normal; }
+
 .filter-panel {
   border-top: 1px dashed var(--card-border);
   padding-top: 0.6rem;

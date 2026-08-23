@@ -9,7 +9,30 @@ want in the pool (e.g. turn off a car type or lock the class to S1 only).
 There's also a **Roll a Specific Race** section that picks one named race
 from the full FH6 race list (Street, Road, Touge, Drag, Dirt, Cross Country).
 It has no filter panel of its own — it reuses whatever's enabled/disabled in
-the Race Type card above it.
+the Race Type card above it. On **Spin All** it's locked to the *exact* Race
+Type that spin just rolled, rather than the broader enabled-types pool a
+manual click on its own Spin button uses.
+
+### The car cascade never lands on an impossible combo
+
+Car Type → Country → Brand → Decade → Performance Class roll as a chain, each
+stage ruling out anything that isn't backed by a real car in
+`data/cars.js` (FH6's full 636-car roster) given everything rolled before it —
+so you'll never get, say, a German Kei Car or a 2020s Classic Muscle car.
+Spinning any single card in that chain (not just Spin All) re-rolls
+everything downstream of it too, so the result is always consistent.
+
+Performance Class works a little differently: it's not picked from a fixed
+list so much as computed from the stock class of whichever real cars match
+the roll so far. Cars can be tuned *up*, never down, so:
+- classes below the lowest-PI stock car in that matching pool are ruled out;
+- every car can be tuned up to at least S2;
+- reaching **R** needs a stock S2-or-higher car in the matching pool;
+- reaching **X** needs a stock R-or-higher car in the matching pool.
+
+Check **Stock cars only** on the Performance Class card to turn this tuning
+headroom off entirely — it'll only offer classes a matching car actually
+ships in.
 
 No build step, no dependencies, no server required — it's plain HTML/CSS/JS.
 
@@ -37,6 +60,7 @@ data/brands.js            Manufacturers (with country of origin)
 data/countries.js         Countries of origin
 data/decades.js           Model decades
 data/classes.js           Forza performance classes (D through X)
+data/cars.js               The full FH6 car roster (stock config) - powers the cascade
 ```
 
 `js/app.js` is entirely data-agnostic — it just reads whatever is in the
@@ -72,14 +96,21 @@ the old `id` and just update the `name`.
 - `data/countries.js` — `{ id, name }`
 - `data/decades.js` — `{ id, name }`
 - `data/classes.js` — `{ id, name, pi, color }`
+- `data/cars.js` — `{ id, name, make, type, country, year, decade, class, pi }` — `make`/`type`/`country`/`decade`/`class` each reference an id in the file of the matching name above; `pi` is the car's **stock** Performance Index
 
 New items you add are **enabled by default** for everyone — the app only
 persists which items are *disabled*, so anything new automatically joins the
 active pool without extra migration work.
 
+Adding a new car to `data/cars.js` is the one case where accuracy matters
+most, since it directly drives which combos the cascade considers possible —
+double-check the make/type/country/class against the in-game car list before
+adding it.
+
 ## Notes on the starting data set
 
 The brand list (89 manufacturers), car type list, country list, performance
-classes (D–X, FH6's PI bands), and the full named-race list were captured
-directly from the in-game FH6 filters/roster as of August 2026. Treat it as a
-living document and update it as the game evolves.
+classes (D–X, FH6's PI bands), the full named-race list, and the full 636-car
+roster in `data/cars.js` (name, make, year, type, country, stock class) were
+captured directly from the in-game FH6 filters/roster as of August 2026.
+Treat it as a living document and update it as the game evolves.
