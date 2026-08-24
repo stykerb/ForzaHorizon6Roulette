@@ -11,6 +11,7 @@
   --on-accent: #2b0012;
   --danger: #e0402f;
   --radius: 10px;
+  --wheel-slot-h: 100px;
   font-size: 16px;
 }
 
@@ -606,6 +607,241 @@ body {
 /* Preset tooltips use the native `title` attribute (browser-rendered, so
    they can never clip against the viewport edge the way a CSS ::after
    tooltip pinned to the button would). */
+
+/* ---- wheelspin animation --------------------------------------------- */
+.wheelspin-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 10, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 300;
+}
+.wheelspin-overlay.hidden { display: none; }
+
+/* Two in-game-styled backdrops, switched via [data-phase] on the panel - a
+   green starburst for the one-shot "Super Wheelspin" triple, a pink/orange
+   one for the five sequential single "Wheelspin" cards. The conic-gradient
+   is the sunburst-ray texture; the radial-gradient is the base color glow. */
+.wheelspin-panel {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 1080px;
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 2.25rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  background: var(--card-bg);
+}
+.wheelspin-panel[data-phase="triple"] {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.18), transparent 45%),
+    repeating-conic-gradient(from 0deg at 20% 18%, rgba(255, 255, 255, 0.07) 0deg 4deg, transparent 4deg 11deg),
+    radial-gradient(circle at 20% 15%, #a9e35f 0%, #6cc23e 40%, #2f8f14 100%);
+  border-color: #2f8f14;
+}
+.wheelspin-panel[data-phase="single"] {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.18), transparent 45%),
+    repeating-conic-gradient(from 0deg at 20% 18%, rgba(255, 255, 255, 0.09) 0deg 4deg, transparent 4deg 11deg),
+    linear-gradient(135deg, #ff2d78 0%, #d6217a 40%, #ff8a1a 100%);
+  border-color: #c4185e;
+}
+
+.wheelspin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  gap: 1rem;
+}
+
+.wheelspin-brand { display: flex; align-items: center; }
+/* The mascot SVG carries the whole logo lockup now - badge, character, and
+   the curved "HORIZON WHEELSPIN" wordmark baked into one graphic, like the
+   in-game logo. Two full variants (not just a swapped detail) are toggled
+   by phase, so they're genuinely different pictures. */
+.wheelspin-mascot { width: 168px; height: auto; flex-shrink: 0; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.35)); }
+.wheelspin-mascot-super { display: none; }
+.wheelspin-panel[data-phase="triple"] .wheelspin-mascot-single { display: none; }
+.wheelspin-panel[data-phase="triple"] .wheelspin-mascot-super { display: block; }
+
+/* Counter is a real mechanical-odometer roller: the viewport shows one row,
+   and rollCounterTo() slides the track up by exactly one row height to
+   reveal the next number, then resets instantly once settled. */
+.wheelspin-counter-box { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.wheelspin-counter-num {
+  position: relative;
+  width: 4.6rem;
+  height: 3.4rem;
+  padding: 0;
+  background: #f4f4f4;
+  border-radius: 8px;
+  border: 3px solid #16130a;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.wheelspin-counter-track { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+.wheelspin-counter-digit {
+  height: 3.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #16130a;
+  font-size: 2.1rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.wheelspin-counter-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.92);
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  max-width: 11rem;
+}
+
+.wheelspin-stage { margin-bottom: 2rem; }
+.wheelspin-stage-triple {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+.wheelspin-stage-single {
+  display: flex;
+  justify-content: center;
+}
+.wheelspin-stage-single .wheel-col { width: 100%; max-width: 560px; }
+
+.wheelspin-controls {
+  display: flex;
+  justify-content: center;
+}
+.wheelspin-btn {
+  background: #ffffff;
+  color: #16130a;
+  border: none;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1rem 2.6rem;
+  font-size: 1.2rem;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+.wheelspin-btn:hover { border-color: transparent; transform: translateY(-1px); }
+
+.wheel-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.wheel-col-label {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+  font-weight: 700;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Reel viewport is 3 slots tall so the landed item sits centered with the
+   item before/after it in the shuffled sequence peeking in above/below,
+   echoing the in-game reel's "current pick flanked by neighbors" look. The
+   reel's own background is dark, so each item's individual white tile
+   (below) reads as a distinct card with a visible gap around it, rather
+   than one continuous strip of text. The peek fade is a pair of opaque
+   black gradient overlays (::before/::after below), fixed to this box's own
+   height and painted on TOP of the scrolling content - not a mask/alpha
+   fade, which would reveal whatever is truly behind the element (the
+   panel's green/pink backdrop) rather than a clean black vignette. */
+.wheel-reel {
+  position: relative;
+  width: 100%;
+  height: calc(var(--wheel-slot-h) * 3);
+  overflow: hidden;
+  border-radius: 14px;
+  border: 4px solid #ffffff;
+  background: #14171d;
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.wheel-reel::before,
+.wheel-reel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 28%;
+  z-index: 3;
+  pointer-events: none;
+}
+.wheel-reel::before { top: 0; background: linear-gradient(180deg, #000 0%, transparent 100%); }
+.wheel-reel::after { bottom: 0; background: linear-gradient(0deg, #000 0%, transparent 100%); }
+.wheel-reel.landed { border-color: #ffd23f; box-shadow: 0 0 0 3px #16130a, 0 0 0 7px rgba(255, 210, 63, 0.55), inset 0 0 0 2px rgba(0, 0, 0, 0.4); }
+.wheel-reel.no-options { border-color: var(--danger); }
+
+.wheel-reel-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  will-change: transform;
+}
+/* Fades the whole reel to white for the last stretch of the spin, then
+   clears on landing - the same trick the in-game wheelspin uses to cover up
+   that the scroll itself is only a graphic, not the real (weighted) draw. */
+.wheel-reel-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+}
+.wheel-slot {
+  height: var(--wheel-slot-h);
+  box-sizing: border-box;
+  display: flex;
+  padding: 0.3rem 0.5rem;
+}
+.wheel-tile {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 0.7rem;
+  font-weight: 800;
+  font-size: 1.5rem;
+  line-height: 1.15;
+  color: #12151b;
+  overflow: hidden;
+  background: #ffffff;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+.wheel-reel.no-options .wheel-slot { height: calc(var(--wheel-slot-h) * 3); }
+.wheel-reel.no-options .wheel-tile {
+  color: var(--text-dim);
+  font-style: italic;
+  font-weight: 400;
+  box-shadow: none;
+}
+
+@media (max-width: 640px) {
+  .wheelspin-stage-triple { grid-template-columns: 1fr; }
+  .wheelspin-header { flex-direction: column; gap: 1.25rem; }
+  .wheelspin-mascot { width: 76px; height: 76px; }
+}
 
 @media (max-width: 720px) {
   .global-actions { flex-direction: column; align-items: stretch; }

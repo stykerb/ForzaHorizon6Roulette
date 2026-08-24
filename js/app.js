@@ -70,6 +70,7 @@
   const LS_WEIGHTED = "fh6r-weighted-v1";
   const LS_STRICT = "fh6r-strict-v1";
   const LS_EXCLUDE_LONG_TRACKS = "fh6r-exclude-long-tracks-v1";
+  const LS_WHEELSPIN_ANIM = "fh6r-wheelspin-anim-v1";
   const LS_ALWAYS_ANY = "fh6r-always-any-v1";
   const LS_MULTIPLIERS = "fh6r-weight-multipliers-v1";
   const MAX_HISTORY = 30;
@@ -117,6 +118,7 @@
   let weighted = loadJSON(LS_WEIGHTED, true);
   let strictMode = loadJSON(LS_STRICT, false);
   let excludeLongTracks = loadJSON(LS_EXCLUDE_LONG_TRACKS, false);
+  let wheelspinAnimEnabled = loadJSON(LS_WHEELSPIN_ANIM, true);
   let alwaysAny = loadJSON(LS_ALWAYS_ANY, {});
   let multipliers = loadJSON(LS_MULTIPLIERS, {}); // { carType: {id: mult}, ... }
   WEIGHTABLE_KEYS.forEach((k) => {
@@ -137,6 +139,7 @@
     saveJSON(LS_WEIGHTED, weighted);
     saveJSON(LS_STRICT, strictMode);
     saveJSON(LS_EXCLUDE_LONG_TRACKS, excludeLongTracks);
+    saveJSON(LS_WHEELSPIN_ANIM, wheelspinAnimEnabled);
     saveJSON(LS_ALWAYS_ANY, alwaysAny);
   }
   function persistMultipliers() {
@@ -565,7 +568,7 @@
       subEl.textContent = "";
       return;
     }
-    resultEl.textContent = item.name;
+    resultEl.textContent = displayName(cat, item);
     resultEl.classList.toggle("is-any", isAny(item));
     resultEl.style.color = cat.color ? cat.color(item) : "";
     subEl.textContent = isAny(item) ? "No constraint on this pick" : cat.sub ? cat.sub(item) : item.desc || "";
@@ -609,23 +612,377 @@
     showToast("Results cleared - every card rolls fresh now.");
   }
 
-  function spinAll() {
+  // Rolls every category via the same rollChain logic Spin All has always
+  // used - populates `current` with the final, already-guaranteed-valid
+  // results. Separated from finalizeSpinAll so the wheelspin animation can
+  // run the real roll up front (silently) and only defer how/when the
+  // results get *revealed*, never re-deriving or faking them.
+  function computeSpinAllChains() {
     CATEGORIES.forEach((cat) => {
       current[cat.key] = null;
     });
     const okRace = rollChain(["race", "specificRace"]);
     const okSeason = rollChain(["season"]);
     const okCar = rollChain([...CASCADE_ORDER, "class"]);
+    return { okRace, okSeason, okCar };
+  }
+
+  function finalizeSpinAll(result) {
     CATEGORIES.forEach((cat) => {
       renderResult(cat);
       flashResult(cat);
     });
     persistCurrent();
     refreshAllCounts();
-    if (!okRace || !okSeason || !okCar) {
+    if (!result.okRace || !result.okSeason || !result.okCar) {
       showToast("One or more categories have no valid options - check filters.");
     }
     pushHistory();
+  }
+
+  function spinAll() {
+    finalizeSpinAll(computeSpinAllChains());
+  }
+
+  function spinAllAnimated() {
+    const result = computeSpinAllChains();
+    runWheelSpinAnimation(() => finalizeSpinAll(result));
+  }
+
+  // ---- wheelspin animation ----------------------------------------------
+  // Purely a reveal: by the time this runs, `current` already holds the
+  // real, final result for every category (computeSpinAllChains ran first).
+  // Each reel's scrolling pool is realPoolFor(cat) - the same structural,
+  // "what's actually possible given what's rolled above it" pool the count
+  // badges use - so a reel never scrolls through an option that couldn't
+  // legally follow whatever's already landed to its left/above it.
+  const WHEEL_SLOT_H = 100; // keep in sync with --wheel-slot-h in css/styles.css
+  const TRIPLE_KEYS = ["race", "specificRace", "season"];
+  const SINGLE_KEYS = [...CASCADE_ORDER, "class"];
+
+  const wheelspinOverlay = document.getElementById("wheelspin-overlay");
+  const wheelspinPanelEl = wheelspinOverlay.querySelector('[data-role="wheelspin-panel"]');
+  const wheelspinCounterNumEl = wheelspinOverlay.querySelector('[data-role="wheelspin-counter-num"]');
+  const wheelspinCounterTrackEl = wheelspinOverlay.querySelector('[data-role="wheelspin-counter-track"]');
+  const wheelspinCounterLabelEl = wheelspinOverlay.querySelector('[data-role="wheelspin-counter-label"]');
+  const wheelspinStageEl = wheelspinOverlay.querySelector('[data-role="wheelspin-stage"]');
+  const wheelspinActionBtn = wheelspinOverlay.querySelector('[data-role="wheelspin-action"]');
+  let wheelspinActive = false;
+  let counterDisplayedValue = null; // null = nothing shown yet, next set snaps instead of rolling
+
+  function wheelItemColor(cat, item) {
+    if (!cat.color || isAny(item)) return "";
+    return cat.color(item) || "";
+  }
+
+  // Performance Class options ("D", "S1", "X"...) read as too terse/small on
+  // their own in a big card or tile, so both the main result card and the
+  // wheelspin reels spell them out as "S1 Class" etc. Every other category
+  // (and the shared PERFORMANCE_CLASSES data itself, used elsewhere - the
+  // weights modal, filter list, data browser) is untouched.
+  function displayName(cat, item) {
+    if (cat.key === "class" && !isAny(item)) return `${item.name} Class`;
+    return item.name;
+  }
+
+  // Rolls the counter box like a mechanical odometer digit: slides the
+  // current value up and out while the new one slides in from below, then
+  // resets to a single settled row. The very first call (or a repeat of the
+  // same value) just snaps - there's nothing meaningful to roll from.
+  function rollCounterTo(newValue) {
+    const track = wheelspinCounterTrackEl;
+    if (counterDisplayedValue === null || counterDisplayedValue === newValue) {
+      track.style.transition = "none";
+      track.style.transform = "translateY(0)";
+      track.innerHTML = `<div class="wheelspin-counter-digit">${newValue}</div>`;
+      counterDisplayedValue = newValue;
+      return;
+    }
+    const rowH = wheelspinCounterNumEl.clientHeight;
+    track.style.transition = "none";
+    track.style.transform = "translateY(0)";
+    track.innerHTML = `
+      <div class="wheelspin-counter-digit">${counterDisplayedValue}</div>
+      <div class="wheelspin-counter-digit">${newValue}</div>
+    `;
+    void track.offsetHeight; // force reflow so the transition below actually animates
+    track.style.transition = "transform 380ms cubic-bezier(0.3, 0.7, 0.3, 1)";
+    requestAnimationFrame(() => {
+      track.style.transform = `translateY(-${rowH}px)`;
+    });
+    const settle = () => {
+      track.removeEventListener("transitionend", settle);
+      track.style.transition = "none";
+      track.style.transform = "translateY(0)";
+      track.innerHTML = `<div class="wheelspin-counter-digit">${newValue}</div>`;
+    };
+    track.addEventListener("transitionend", settle);
+    setTimeout(settle, 450);
+    counterDisplayedValue = newValue;
+  }
+
+  function buildWheelCol(key) {
+    const cat = categoryByKey[key];
+    const col = document.createElement("div");
+    col.className = "wheel-col";
+    col.dataset.key = key;
+    col.innerHTML = `
+      <span class="wheel-col-label">${cat.icon} ${cat.label}</span>
+      <div class="wheel-reel" data-role="wheel-reel">
+        <div class="wheel-reel-track"></div>
+        <div class="wheel-reel-flash" data-role="wheel-reel-flash"></div>
+      </div>
+    `;
+    return col;
+  }
+
+  // Draws `count` rows from `items`, each independently as likely as any
+  // other, but never repeating the row directly above it. The spin is only
+  // ever a graphic, not a weighted draw, but a small filtered-down pool
+  // (e.g. 2 countries left) can otherwise land the same option in adjacent
+  // rows purely by chance - jarring since it reads as "the wheel is stuck."
+  // `firstPrevId`, if given, keeps row 0 from repeating whatever's already
+  // showing just above where this sequence gets spliced in (e.g. the real
+  // target it's landing on).
+  function randomNoAdjacentRepeat(items, count, firstPrevId) {
+    const seq = [];
+    let prevId = firstPrevId || null;
+    for (let i = 0; i < count; i++) {
+      const choices = items.length > 1 && prevId !== null ? items.filter((it) => it.id !== prevId) : items;
+      const pick = choices[Math.floor(Math.random() * choices.length)];
+      seq.push(pick);
+      prevId = pick.id;
+    }
+    return seq;
+  }
+
+  // Fills a freshly-built reel with a static (non-scrolling) 3-row preview
+  // the moment its card appears, so the window never shows an empty box -
+  // Spin then just starts the same reel scrolling from wherever this left
+  // it, rather than populating it for the first time.
+  function renderIdlePreview(reel, pool, cat) {
+    const track = reel.querySelector(".wheel-reel-track");
+    reel.classList.remove("landed", "no-options");
+    track.style.transition = "none";
+    track.style.transform = "translateY(0)";
+    if (!pool || pool.length === 0) {
+      reel.classList.add("no-options");
+      track.innerHTML = `<div class="wheel-slot"><div class="wheel-tile">No options</div></div>`;
+      return;
+    }
+    const items = pool.map((p) => p.item);
+    const preview = randomNoAdjacentRepeat(items, 3);
+    track.innerHTML = preview
+      .map((item) => `<div class="wheel-slot"><div class="wheel-tile" style="color:${wheelItemColor(cat, item)}">${displayName(cat, item)}</div></div>`)
+      .join("");
+  }
+
+  const SPIN_PREFIX_ROWS = 24; // decorative rows scrolled through before landing
+
+  // Spins a single reel: scrolls through `pool` (no adjacent repeats, every
+  // row equally likely - see randomNoAdjacentRepeat), then settles on
+  // `target` (the already-known real result). Like the in-game wheelspin,
+  // the reel fades to white for the last stretch before landing - it's
+  // covering up that the scroll is just a graphic, not the actual (weighted)
+  // draw, the same trick the game itself uses. `onDone` fires once the
+  // landing transition and reveal both finish (or immediately for a
+  // "no options" reel).
+  function animateReel(reel, pool, target, cat, durationMs, onDone) {
+    const track = reel.querySelector(".wheel-reel-track");
+    const flash = reel.querySelector('[data-role="wheel-reel-flash"]');
+    reel.classList.remove("landed", "no-options");
+    flash.style.transition = "none";
+    flash.style.opacity = "0";
+
+    if (!target || !pool || pool.length === 0) {
+      reel.classList.add("no-options");
+      track.style.transition = "none";
+      track.style.transform = "translateY(0)";
+      track.innerHTML = `<div class="wheel-slot"><div class="wheel-tile">No options</div></div>`;
+      setTimeout(() => onDone && onDone(), 150);
+      return;
+    }
+
+    const items = pool.map((p) => p.item);
+    const prefix = randomNoAdjacentRepeat(items, SPIN_PREFIX_ROWS);
+    // Don't let the row right before the target coincidentally match it.
+    if (items.length > 1 && prefix[prefix.length - 1].id === target.id) {
+      const prevPrevId = prefix.length > 1 ? prefix[prefix.length - 2].id : null;
+      const choices = items.filter((it) => it.id !== target.id && it.id !== prevPrevId);
+      prefix[prefix.length - 1] = (choices.length ? choices : items.filter((it) => it.id !== target.id))[0];
+    }
+    const sequence = [...prefix, target];
+    const targetIndex = sequence.length - 1;
+    // Two more (purely decorative - never landed on) rows after the target,
+    // so the 3-row-tall reel shows it centered with neighbors peeking above
+    // and below, matching the in-game reel's look.
+    sequence.push(...randomNoAdjacentRepeat(items, 2, target.id));
+
+    track.innerHTML = sequence
+      .map((item) => `<div class="wheel-slot"><div class="wheel-tile" style="color:${wheelItemColor(cat, item)}">${displayName(cat, item)}</div></div>`)
+      .join("");
+
+    const finalOffset = (targetIndex - 1) * WHEEL_SLOT_H;
+    track.style.transition = "none";
+    track.style.transform = "translateY(0px)";
+    void track.offsetHeight; // force reflow so the transition below actually animates
+    track.style.transition = `transform ${durationMs}ms cubic-bezier(0.15, 0.72, 0.24, 1)`;
+    requestAnimationFrame(() => {
+      track.style.transform = `translateY(-${finalOffset}px)`;
+    });
+
+    // Fade to white for the final stretch of the spin (masking exactly which
+    // rows are scrolling past right as it decelerates), then clear quickly
+    // once landed to reveal the result - mirrors the in-game wheelspin.
+    const flashInDelay = durationMs * 0.55;
+    const flashInDuration = durationMs * 0.3;
+    const flashInTimer = setTimeout(() => {
+      flash.style.transition = `opacity ${flashInDuration}ms ease-in`;
+      flash.style.opacity = "1";
+    }, flashInDelay);
+
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(flashInTimer);
+      track.removeEventListener("transitionend", settle);
+      reel.classList.add("landed");
+      flash.style.transition = "opacity 220ms ease-out";
+      flash.style.opacity = "0";
+      if (onDone) onDone();
+    };
+    track.addEventListener("transitionend", settle);
+    setTimeout(settle, durationMs + 300); // fallback in case transitionend doesn't fire
+  }
+
+  // Two gated phases, each advanced by hand:
+  //   "triple" - one event, the three race cards spinning together (staggered
+  //              stops, 0.5s apart, left to right). Exactly one "Super
+  //              Wheelspin," so its counter only ever reads 1 or 0.
+  //   "single" - the five car-build cards, one at a time. Its counter is the
+  //              count of those five still un-landed.
+  // The user drives every step: pressing "Spin" starts the current stage,
+  // and only once it lands does the button become "Next" (or "Finish" on the
+  // very last one) to move on - nothing advances on its own.
+  function runWheelSpinAnimation(onComplete) {
+    if (wheelspinActive) return;
+    wheelspinActive = true;
+    counterDisplayedValue = null; // fresh open: first counter render should snap, not roll
+
+    let phase = "triple"; // "triple" | "single"
+    let singleIdx = 0;
+    let stageLanded = false;
+    let cancelled = false;
+
+    function currentKeys() {
+      return phase === "triple" ? TRIPLE_KEYS : [SINGLE_KEYS[singleIdx]];
+    }
+
+    function updateCounter() {
+      let remaining, label;
+      if (phase === "triple") {
+        remaining = stageLanded ? 0 : 1;
+        label = `Super Wheelspin${remaining === 1 ? "" : "s"} Remaining`;
+      } else {
+        remaining = SINGLE_KEYS.length - singleIdx - (stageLanded ? 1 : 0);
+        label = `Wheelspin${remaining === 1 ? "" : "s"} Remaining`;
+      }
+      rollCounterTo(remaining);
+      wheelspinCounterLabelEl.textContent = label;
+    }
+
+    function buildStage() {
+      wheelspinPanelEl.dataset.phase = phase;
+      wheelspinStageEl.className = phase === "triple" ? "wheelspin-stage wheelspin-stage-triple" : "wheelspin-stage wheelspin-stage-single";
+      wheelspinStageEl.innerHTML = "";
+      currentKeys().forEach((key) => {
+        const col = buildWheelCol(key);
+        wheelspinStageEl.appendChild(col);
+        const cat = categoryByKey[key];
+        renderIdlePreview(col.querySelector('[data-role="wheel-reel"]'), injectAny(realPoolFor(cat), cat), cat);
+      });
+    }
+
+    function isLastStage() {
+      return phase === "single" && singleIdx === SINGLE_KEYS.length - 1;
+    }
+
+    function startSpin() {
+      wheelspinActionBtn.disabled = true;
+      const keys = currentKeys();
+      // 50% longer than the original [1000,1500,2000]/[1100] pacing - the
+      // extra time is what the pre-reveal white flash (see animateReel) needs.
+      const durations = phase === "triple" ? [1500, 2250, 3000] : [1650];
+      let toLand = keys.length;
+      keys.forEach((key, i) => {
+        const cat = categoryByKey[key];
+        const reel = wheelspinStageEl.querySelector(`[data-key="${key}"] [data-role="wheel-reel"]`);
+        const pool = injectAny(realPoolFor(cat), cat);
+        animateReel(reel, pool, current[key], cat, durations[i], () => {
+          if (cancelled) return;
+          toLand--;
+          if (toLand === 0) {
+            stageLanded = true;
+            updateCounter();
+            wheelspinActionBtn.textContent = isLastStage() ? "Finish" : "Next";
+            wheelspinActionBtn.disabled = false;
+          }
+        });
+      });
+    }
+
+    function advanceStage() {
+      if (phase === "triple") {
+        phase = "single";
+        singleIdx = 0;
+      } else if (singleIdx < SINGLE_KEYS.length - 1) {
+        singleIdx++;
+      } else {
+        finish();
+        return;
+      }
+      stageLanded = false;
+      buildStage();
+      updateCounter();
+      wheelspinActionBtn.textContent = "Spin";
+      wheelspinActionBtn.disabled = false;
+    }
+
+    function onActionClick() {
+      if (stageLanded) advanceStage();
+      else startSpin();
+    }
+
+    function finish() {
+      if (cancelled) return;
+      cancelled = true;
+      wheelspinOverlay.classList.add("hidden");
+      wheelspinActionBtn.removeEventListener("click", onActionClick);
+      wheelspinOverlay.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeydown);
+      wheelspinActive = false;
+      onComplete();
+    }
+    // Escape/backdrop click is a skip-to-end escape hatch, not the main
+    // flow - safe at any point since `current` already holds the real,
+    // fully-computed results regardless of how far the reveal got.
+    function onBackdropClick(e) {
+      if (e.target === wheelspinOverlay) finish();
+    }
+    function onKeydown(e) {
+      if (e.key === "Escape") finish();
+    }
+
+    wheelspinActionBtn.addEventListener("click", onActionClick);
+    wheelspinOverlay.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeydown);
+
+    buildStage();
+    updateCounter();
+    wheelspinActionBtn.textContent = "Spin";
+    wheelspinActionBtn.disabled = false;
+    wheelspinOverlay.classList.remove("hidden");
   }
 
   function pushHistory() {
@@ -709,9 +1066,22 @@
     () => excludeLongTracks,
     (v) => (excludeLongTracks = v)
   );
+  // Wheelspin animation doesn't affect any pool, so skip the refreshAllCounts
+  // wireToggle() does after every other setting - wire it by hand instead.
+  (function () {
+    const el = document.getElementById("wheelspin-anim-toggle");
+    el.checked = wheelspinAnimEnabled;
+    el.addEventListener("change", (e) => {
+      wheelspinAnimEnabled = e.target.checked;
+      persistSettings();
+    });
+  })();
 
   // ---- wire up global controls ----------------------------------------
-  document.getElementById("spin-all").addEventListener("click", spinAll);
+  document.getElementById("spin-all").addEventListener("click", () => {
+    if (wheelspinAnimEnabled) spinAllAnimated();
+    else spinAll();
+  });
   document.getElementById("reset-spin").addEventListener("click", resetSpin);
 
   document.getElementById("copy-challenge").addEventListener("click", async () => {
