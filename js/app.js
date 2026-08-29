@@ -181,7 +181,16 @@
     });
   }
 
-  function carsSatisfyingAllExcept(excludeKey) {
+  // `staleKeys` (optional): CASCADE_ORDER stages whose current[] value
+  // should NOT be treated as a fixed constraint here, even though their
+  // FILTER still applies - because they haven't been (re)decided yet in
+  // whatever respin is currently in progress, so their current[] is left
+  // over from before it started. Without this, respinning e.g. Country
+  // while Brand/Decade/Class still hold their old values would wrongly
+  // restrict Country to whatever matches those stale picks (whichever
+  // country happens to share a car with the old Brand), instead of the
+  // full set of countries the car type actually supports.
+  function carsSatisfyingAllExcept(excludeKey, staleKeys) {
     const disabledSets = {};
     CASCADE_ORDER.forEach((key) => {
       disabledSets[key] = new Set(disabledIds[key]);
@@ -192,6 +201,7 @@
         if (key === excludeKey) continue;
         const field = CASCADE_CAR_FIELD[key];
         if (disabledSets[key].has(car[field])) return false;
+        if (staleKeys && staleKeys.has(key)) continue;
         const sel = current[key];
         if (sel && !isAny(sel) && car[field] !== sel.id) return false;
       }
@@ -281,9 +291,9 @@
 
   // Joint pool - what the actual roll draws from, so a filter set anywhere
   // in the chain (not just above this card) keeps a dead end from ever
-  // being picked in the first place.
-  function spinPoolFor(cat) {
-    return poolForStage(cat, carsSatisfyingAllExcept);
+  // being picked in the first place. `staleKeys` - see carsSatisfyingAllExcept.
+  function spinPoolFor(cat, staleKeys) {
+    return poolForStage(cat, (excludeKey) => carsSatisfyingAllExcept(excludeKey, staleKeys));
   }
 
   // Injects "Any" into a real pool. Skipped when Strict Mode is on, the
@@ -297,8 +307,8 @@
     return [...real, { item: ANY, weight: minWeight, base: null }];
   }
 
-  function spinFullPool(cat) {
-    return injectAny(spinPoolFor(cat), cat);
+  function spinFullPool(cat, staleKeys) {
+    return injectAny(spinPoolFor(cat, staleKeys), cat);
   }
 
   function weightedRandom(pool) {
@@ -342,6 +352,13 @@
       if (i >= stageKeys.length) return true;
       const key = stageKeys[i];
       const cat = categoryByKey[key];
+      // Stages after this one in the chain haven't been (re)decided yet -
+      // their current[] is still whatever it was before this respin
+      // started, so the joint pool below must not treat it as fixed (see
+      // carsSatisfyingAllExcept). Everything at or before index i is
+      // already final for this pass (kept-and-confirmed, or freshly
+      // picked), so it's correctly still treated as fixed context.
+      const staleKeys = new Set(stageKeys.slice(i + 1));
 
       if (keepIfFits && keepIfFits.has(key)) {
         const existing = current[key];
@@ -358,7 +375,7 @@
 
       for (;;) {
         if (++attempts > MAX_ATTEMPTS) return false;
-        const pool = spinFullPool(cat).filter((p) => !excludeSets[key].has(p.item.id));
+        const pool = spinFullPool(cat, staleKeys).filter((p) => !excludeSets[key].has(p.item.id));
         if (pool.length === 0) {
           current[key] = null;
           return false;
