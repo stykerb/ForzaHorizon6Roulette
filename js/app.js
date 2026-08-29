@@ -288,12 +288,13 @@
 
   // Injects "Any" into a real pool. Skipped when Strict Mode is on, the
   // category doesn't allow it, or there's only one real option (Any would
-  // be redundant with it). Any's weight is the pool's average, so it reads
-  // as "about as likely as a typical option" rather than dominating/vanishing.
+  // be redundant with it). Any's weight matches the pool's least-weighted
+  // real option, so it never outweighs even the rarest item - it reads as
+  // "at least as likely as the option you're least likely to get anyway."
   function injectAny(real, cat) {
     if (!cat.allowAny || strictMode || real.length <= 1) return real;
-    const totalWeight = real.reduce((sum, r) => sum + r.weight, 0);
-    return [...real, { item: ANY, weight: totalWeight / real.length, base: null }];
+    const minWeight = Math.min(...real.map((r) => r.weight));
+    return [...real, { item: ANY, weight: minWeight, base: null }];
   }
 
   function spinFullPool(cat) {
@@ -320,7 +321,18 @@
     return [key]; // specificRace, season, class
   }
 
-  function rollChain(stageKeys) {
+  // `keepIfFits` (optional): stage keys allowed to keep their existing
+  // current[] value instead of rolling a fresh one, PROVIDED that value is
+  // still legal given everything already settled earlier in this same
+  // chain (checked in order, so each stage sees up-to-date upstream
+  // values - including any upstream stage that itself just got rerolled).
+  // Used by spinOne so respinning e.g. Decade doesn't needlessly scramble
+  // Performance Class unless the new Decade actually invalidates it. Any
+  // always counts as still fitting (it has no upstream dependency).
+  // Falls through to a normal reroll if the kept value can't lead to a
+  // valid rest-of-chain. Never used by Spin All, which clears every
+  // stage's current[] first, so there's nothing to keep either way.
+  function rollChain(stageKeys, keepIfFits) {
     const excludeSets = {};
     stageKeys.forEach((k) => (excludeSets[k] = new Set()));
     let attempts = 0;
@@ -330,6 +342,12 @@
       if (i >= stageKeys.length) return true;
       const key = stageKeys[i];
       const cat = categoryByKey[key];
+
+      if (keepIfFits && keepIfFits.has(key)) {
+        const existing = current[key];
+        const existingFits = existing && (isAny(existing) ? cat.allowAny && !strictMode : realPoolFor(cat).some((p) => p.item.id === existing.id));
+        if (existingFits && tryStage(i + 1)) return true;
+      }
 
       if (alwaysAny[key] && cat.allowAny) {
         current[key] = ANY;
@@ -587,14 +605,21 @@
 
   function spinOne(key, animate) {
     const stages = stagesFrom(key);
+    // stages[0] is the card actually spun - always rerolls. Everything
+    // below it in the chain only rerolls if its current value stops
+    // fitting once stages[0]'s new pick (and anything else re-rolled ahead
+    // of it) is in place - see the keepIfFits handling in rollChain.
+    const before = {};
     stages.forEach((k) => {
-      current[k] = null;
+      before[k] = current[k] ? current[k].id : null;
     });
-    const ok = rollChain(stages);
+    current[stages[0]] = null;
+    const ok = rollChain(stages, new Set(stages.slice(1)));
     stages.forEach((stageKey) => {
       const cat = categoryByKey[stageKey];
       renderResult(cat);
-      if (animate) flashResult(cat);
+      const changed = (current[stageKey] ? current[stageKey].id : null) !== before[stageKey];
+      if (animate && changed) flashResult(cat);
     });
     persistCurrent();
     refreshAllCounts();

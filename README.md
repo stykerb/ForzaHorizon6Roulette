@@ -77,10 +77,16 @@ same four car fields, on purpose:
 That split is deliberate: the display stays simple to read (a card's count
 means exactly what it looks like it means), while the actual spin is always
 safe regardless of which card's filter is doing the constraining. Spinning
-any single card re-rolls everything downstream of it too (e.g. respinning
-Brand alone re-rolls Decade and Performance Class, but keeps Car Type and
-Country fixed; respinning Specific Race alone keeps the current Race Type
-fixed), so a solo respin always stays consistent with what's above it.
+any single card always rerolls that card itself (e.g. respinning Brand
+always picks a new Brand; respinning Specific Race always keeps the current
+Race Type fixed, same as before), but a card *below* it only rerolls if its
+current value stops being legal once the new pick is in place — respinning
+Decade leaves Performance Class alone if the current class still fits the
+new Decade, and only rerolls it if it doesn't. "Any" on a downstream card is
+always kept regardless (it has no upstream dependency to invalidate). This
+keeps a solo respin from needlessly scrambling cards that are still
+perfectly valid, while staying just as safe as before — a card that does
+need to reroll still goes through the same backtracking-guaranteed pool.
 
 Performance Class works a little differently: it's not picked from a fixed
 list so much as computed from the stock class of whichever real cars match
@@ -106,6 +112,11 @@ real races/cars back it) plus a 0×–3× slider for your own multiplier on top
 of that — e.g. drag Ferrari to 3× to see it more, or a country to 0× to
 almost never see it without touching its filter checkbox. Multipliers apply
 whether or not "Weighted by rarity" is on.
+
+Where a category allows "Any," its weight is set to match whichever real
+option in the current pool is weighted lowest — so it never outweighs even
+the rarest real option, and reads as "about as likely as the option you're
+least likely to get anyway" rather than a generic average.
 
 ### Copy Challenge
 
