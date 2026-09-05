@@ -29,6 +29,7 @@
       <div class="actions-right">
         <button type="button" id="show-weights" class="btn">⚖️ Weights</button>
         <button type="button" id="show-data-table" class="btn">📊 Show Data</button>
+        <button type="button" id="show-matching-cars" class="btn" disabled title="Roll a full car build first">🚙 Matching Cars</button>
       </div>
     </div>
 
@@ -58,6 +59,11 @@
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
         <span class="toggle-label">Wheelspin animation <em>(Spin All plays an animated wheel spin)</em></span>
       </label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="japanize-lexus-acura-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Treat Lexus/Acura as Japan <em>(the game itself groups them under USA)</em></span>
+      </label>
     </div>
 
     <section class="group-section preset-section">
@@ -84,6 +90,10 @@
       <div id="history-list" class="history-list"></div>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <p>Car &amp; race data current as of <span id="data-publish-date"></span>.</p>
+  </footer>
 
   <div id="toast" class="toast"></div>
 
@@ -178,6 +188,18 @@
       </div>
       <input type="search" id="data-modal-search" class="filter-search modal-search" placeholder="Search...">
       <div id="data-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="matching-cars-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>Matching Stock Cars</h2>
+        <button type="button" id="matching-cars-modal-close" class="btn btn-tiny">✕ Close</button>
+      </div>
+      <p id="matching-cars-summary" class="modal-subtitle"></p>
+      <input type="search" id="matching-cars-search" class="filter-search modal-search" placeholder="Search...">
+      <div id="matching-cars-body" class="modal-body"></div>
     </div>
   </div>
 

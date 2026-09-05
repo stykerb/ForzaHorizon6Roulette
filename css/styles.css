@@ -370,6 +370,21 @@ body {
 .filter-row:hover { background: var(--bg-alt); }
 .filter-row em { color: var(--text-dim); font-style: normal; font-size: 0.78rem; }
 
+.site-footer {
+  max-width: calc(5 * 260px + 4 * 1.1rem + 2 * 1.25rem);
+  margin: 0 auto;
+  padding: 0 1.25rem 2rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.modal-subtitle {
+  margin: 0.85rem 1.25rem 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
 .history-section { margin-top: 2.5rem; }
 .history-header {
   display: flex;

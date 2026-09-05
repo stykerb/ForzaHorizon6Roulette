@@ -32,6 +32,11 @@
   const CASCADE_ORDER = ["carType", "country", "brand", "decade"];
   const CASCADE_CAR_FIELD = { carType: "type", country: "country", brand: "make", decade: "decade" };
 
+  // Shown in the page footer - keep in sync with README's "Notes on the
+  // starting data set" whenever data/cars.js, data/individualRaces.js, etc.
+  // get refreshed from a newer in-game update.
+  const DATA_PUBLISH_DATE = "August 2026";
+
   function raceTypeColor(typeId) {
     const t = RACE_TYPES.find((x) => x.id === typeId);
     return t ? t.color : "";
@@ -73,6 +78,7 @@
   const LS_WHEELSPIN_ANIM = "fh6r-wheelspin-anim-v1";
   const LS_ALWAYS_ANY = "fh6r-always-any-v1";
   const LS_MULTIPLIERS = "fh6r-weight-multipliers-v1";
+  const LS_JAPANIZE_LEXUS_ACURA = "fh6r-japanize-lexus-acura-v1";
   const MAX_HISTORY = 30;
 
   function countryName(id) {
@@ -124,6 +130,13 @@
   WEIGHTABLE_KEYS.forEach((k) => {
     if (!multipliers[k]) multipliers[k] = {};
   });
+  // In-game, FH6 groups Lexus and Acura under the USA filter (their parent
+  // companies Toyota/Honda are Japanese, but the cars themselves are grouped
+  // with their US-market divisions). On by default: treat them as Japan
+  // instead, matching their real manufacturer origin (data/brands.js already
+  // lists both as Japanese for display purposes - this makes the Country
+  // cascade agree with that instead of the game's USA grouping).
+  let japanizeLexusAcura = loadJSON(LS_JAPANIZE_LEXUS_ACURA, true);
 
   function persistFilters() {
     saveJSON(LS_FILTERS, disabledIds);
@@ -141,10 +154,28 @@
     saveJSON(LS_EXCLUDE_LONG_TRACKS, excludeLongTracks);
     saveJSON(LS_WHEELSPIN_ANIM, wheelspinAnimEnabled);
     saveJSON(LS_ALWAYS_ANY, alwaysAny);
+    saveJSON(LS_JAPANIZE_LEXUS_ACURA, japanizeLexusAcura);
   }
   function persistMultipliers() {
     saveJSON(LS_MULTIPLIERS, multipliers);
   }
+
+  // Cars are always loaded from data/cars.js with their game-accurate
+  // ("usa") country, so the very first pass here is always their real
+  // stored value - safe to capture as the "toggle off" fallback.
+  const LEXUS_ACURA_MAKES = new Set(["lexus", "acura"]);
+  const LEXUS_ACURA_ORIGINAL_COUNTRY = new Map();
+  CARS.forEach((car) => {
+    if (LEXUS_ACURA_MAKES.has(car.make)) LEXUS_ACURA_ORIGINAL_COUNTRY.set(car.id, car.country);
+  });
+  function applyJapanizeLexusAcura() {
+    CARS.forEach((car) => {
+      if (LEXUS_ACURA_MAKES.has(car.make)) {
+        car.country = japanizeLexusAcura ? "japan" : LEXUS_ACURA_ORIGINAL_COUNTRY.get(car.id);
+      }
+    });
+  }
+  applyJapanizeLexusAcura();
 
   function isAny(item) {
     return !!item && item.id === ANY.id;
@@ -231,6 +262,35 @@
     if (hasS2Plus) maxIdx = classIndex("r");
     if (hasRPlus) maxIdx = classIndex("x");
     return CLASS_ORDER.slice(minIdx, maxIdx + 1);
+  }
+
+  // Per-car version of the same tuning-headroom rule computeLegalClassIds
+  // applies to a whole pool: can THIS stock car reach the given target
+  // class? Never down-tune; with "stock cars only" off, every car reaches
+  // at least S2, a stock S2+ car reaches R, and a stock R+ car reaches X.
+  function carReachesClass(car, targetId) {
+    const targetIdx = classIndex(targetId);
+    const stockIdx = classIndex(car.class);
+    if (targetIdx < stockIdx) return false;
+    if (stockOnly) return targetIdx === stockIdx;
+    let capIdx = classIndex("s2");
+    if (stockIdx >= classIndex("s2")) capIdx = classIndex("r");
+    if (stockIdx >= classIndex("r")) capIdx = classIndex("x");
+    return targetIdx <= capIdx;
+  }
+
+  // The stock cars that could actually fulfill the current Car
+  // Type/Country/Brand/Decade/Class result - same structural pool the
+  // Performance Class card's own count badge uses (carsMatchingUpTo), then
+  // narrowed to cars that can reach the rolled class (or all of them, if
+  // Performance Class somehow held "Any" - it never actually does, since
+  // it's the one car-build stage allowAny is off for, but this stays
+  // correct either way).
+  function computeMatchingStockCars() {
+    const pool = carsMatchingUpTo("class");
+    const classSel = current.class;
+    if (!classSel || isAny(classSel)) return pool;
+    return pool.filter((car) => carReachesClass(car, classSel.id));
   }
 
   function appliedWeight(cat, itemId, baseCount) {
@@ -593,6 +653,19 @@
     if (e.key === "Escape" && openPopoverKey) closePopover();
   });
 
+  // Whether every car-build stage (Car Type -> Country -> Brand -> Decade ->
+  // Performance Class) has actually been rolled - i.e. there's a real result
+  // to look up matching stock cars for. "Any" counts as rolled (it's still a
+  // deliberate result), only null (never spun) doesn't.
+  function carBuildComplete() {
+    return [...CASCADE_ORDER, "class"].every((k) => !!current[k]);
+  }
+
+  function refreshMatchingCarsButton() {
+    const btn = document.getElementById("show-matching-cars");
+    if (btn) btn.disabled = !carBuildComplete();
+  }
+
   function renderResult(cat) {
     const card = cardsByKey[cat.key];
     const resultEl = card.querySelector('[data-role="result"]');
@@ -601,6 +674,7 @@
     if (!item) {
       resultEl.innerHTML = `<span class="placeholder">Spin to reveal</span>`;
       subEl.textContent = "";
+      refreshMatchingCarsButton();
       return;
     }
     resultEl.textContent = displayName(cat, item);
@@ -610,6 +684,7 @@
     if (cat.key === "specificRace" && item && !isAny(item)) {
       subEl.textContent = raceTypeName(item.typeId);
     }
+    refreshMatchingCarsButton();
   }
 
   function flashResult(cat) {
@@ -1118,6 +1193,21 @@
       persistSettings();
     });
   })();
+  // This one changes actual car data (CARS[i].country), not just how it's
+  // read - so beyond the usual persist+recount, it also has to force the
+  // data browser's Cars tab to rebuild next time it's opened (it caches its
+  // table HTML, which would otherwise keep showing the stale country).
+  (function () {
+    const el = document.getElementById("japanize-lexus-acura-toggle");
+    el.checked = japanizeLexusAcura;
+    el.addEventListener("change", (e) => {
+      japanizeLexusAcura = e.target.checked;
+      applyJapanizeLexusAcura();
+      dataModalBuilt.cars = false;
+      persistSettings();
+      refreshAllCounts();
+    });
+  })();
 
   // ---- wire up global controls ----------------------------------------
   document.getElementById("spin-all").addEventListener("click", () => {
@@ -1387,10 +1477,13 @@
     filterDataTable("");
   }
 
-  function filterDataTable(term) {
-    const t = term.trim().toLowerCase();
-    const panel = dataModalBody.querySelector(`[data-tab-panel="${dataModalTab}"]`);
+  // Shared by the Show Data modal (which scopes to whichever tab panel is
+  // active) and the Matching Stock Cars modal (a single table, no tabs) -
+  // both just need "hide rows that don't match the search term and every
+  // active column filter" applied to some container holding one buildFilterableTable.
+  function filterTableRows(panel, term) {
     if (!panel) return;
+    const t = term.trim().toLowerCase();
     const colFilters = Array.from(panel.querySelectorAll(".data-col-filter"))
       .map((el) => ({ col: el.dataset.col, isSelect: el.tagName === "SELECT", value: el.value.trim() }))
       .filter((f) => f.value !== "");
@@ -1404,6 +1497,10 @@
       });
       row.style.display = matchesSearch && matchesColumns ? "" : "none";
     });
+  }
+
+  function filterDataTable(term) {
+    filterTableRows(dataModalBody.querySelector(`[data-tab-panel="${dataModalTab}"]`), term);
   }
 
   document.getElementById("show-data-table").addEventListener("click", () => {
@@ -1420,6 +1517,42 @@
     btn.addEventListener("click", () => showDataTab(btn.dataset.modalTab));
   });
   dataSearch.addEventListener("input", (e) => filterDataTable(e.target.value));
+
+  // ---- matching stock cars modal ------------------------------------------
+  // Reuses the same buildFilterableTable/CAR_TABLE_COLUMNS the data browser
+  // uses, just pointed at whatever stock cars actually fulfil the current
+  // roll instead of the full roster. Rebuilt fresh every time it's opened
+  // (unlike the data browser's tabs, there's nothing worth caching - the
+  // matching set changes on every respin).
+  const matchingCarsModal = document.getElementById("matching-cars-modal");
+  const matchingCarsBody = document.getElementById("matching-cars-body");
+  const matchingCarsSummary = document.getElementById("matching-cars-summary");
+  const matchingCarsSearch = document.getElementById("matching-cars-search");
+
+  function matchingCarsSummaryText(cars) {
+    const parts = [...CASCADE_ORDER, "class"].map((k) => (current[k] ? current[k].name : "Any"));
+    return `${parts.join(" · ")} — ${cars.length} stock car${cars.length === 1 ? "" : "s"} match${cars.length === 1 ? "es" : ""}.`;
+  }
+
+  document.getElementById("show-matching-cars").addEventListener("click", () => {
+    if (!carBuildComplete()) return;
+    const cars = computeMatchingStockCars();
+    matchingCarsSummary.textContent = matchingCarsSummaryText(cars);
+    matchingCarsBody.innerHTML = buildFilterableTable(CAR_TABLE_COLUMNS, cars);
+    matchingCarsSearch.value = "";
+    matchingCarsBody.querySelectorAll(".data-col-filter").forEach((el) => {
+      el.addEventListener("input", () => filterTableRows(matchingCarsBody, matchingCarsSearch.value));
+      el.addEventListener("change", () => filterTableRows(matchingCarsBody, matchingCarsSearch.value));
+    });
+    matchingCarsModal.classList.remove("hidden");
+  });
+  matchingCarsSearch.addEventListener("input", (e) => filterTableRows(matchingCarsBody, e.target.value));
+  document.getElementById("matching-cars-modal-close").addEventListener("click", () => {
+    matchingCarsModal.classList.add("hidden");
+  });
+  matchingCarsModal.addEventListener("click", (e) => {
+    if (e.target === matchingCarsModal) matchingCarsModal.classList.add("hidden");
+  });
 
   // ---- weights modal: visualize + manually adjust ------------------------
   const weightsModal = document.getElementById("weights-modal");
@@ -1513,9 +1646,11 @@
     if (e.key !== "Escape") return;
     if (!dataModal.classList.contains("hidden")) dataModal.classList.add("hidden");
     if (!weightsModal.classList.contains("hidden")) weightsModal.classList.add("hidden");
+    if (!matchingCarsModal.classList.contains("hidden")) matchingCarsModal.classList.add("hidden");
   });
 
   // ---- init -------------------------------------------------------------
+  document.getElementById("data-publish-date").textContent = DATA_PUBLISH_DATE;
   CATEGORIES.forEach(buildCard);
   renderHistory();
 })();

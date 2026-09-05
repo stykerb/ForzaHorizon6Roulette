@@ -35,7 +35,12 @@ Your filter choices, settings, weight adjustments, and challenge history are
 saved in your browser's `localStorage`, so they persist between visits on the
 same device/browser.
 
-### The four settings toggles
+The page footer names the month the car/race data was last pulled from the
+game (`DATA_PUBLISH_DATE` in `js/app.js`) - update it alongside the "Notes on
+the starting data set" section below whenever `data/cars.js`,
+`data/individualRaces.js`, etc. get refreshed.
+
+### Settings toggles
 
 - **Weighted by rarity** (on by default) — Race Type, Car Type, Country,
   Brand, and Decade are picked in proportion to how many real races/cars back
@@ -49,6 +54,17 @@ same device/browser.
 - **Exclude Long Tracks** (off by default) — removes FH6's four ultra-long
   signature races (The Titan, The Gauntlet, The Colossus, The Goliath) from
   the Specific Race pool.
+- **Wheelspin animation** (on by default) — Spin All plays an animated,
+  in-game-styled wheelspin reveal instead of just snapping straight to the
+  result.
+- **Treat Lexus/Acura as Japan** (on by default) — FH6 itself groups Lexus
+  and Acura under the USA Country filter (they're grouped with their
+  US-market divisions in-game). On, the Country cascade instead treats their
+  cars as Japanese, matching their real manufacturer origin (the same origin
+  already shown for both brands elsewhere in the app). Off restores the
+  game's own USA grouping. Affects the Country cascade/JDM preset only - the
+  Brand card's own "Japan" origin label for Lexus/Acura doesn't change either
+  way, since that's a fact about the brand, not the game's filter grouping.
 
 Each card also has its own **🎯 Always land on "Any"** toggle, which pins
 that one card to Any on every spin (Spin All or its own Spin button) —
@@ -134,6 +150,19 @@ box at once. The Cars tab's Model column isn't stored data - it's derived
 by stripping the leading year and the make off `name` (which is always
 "`<year> <make> <model>`"), so "1964 Ford Mustang GT Coupe" shows as
 Year 1964 / Make Ford / Model "Mustang GT Coupe".
+
+### Matching Cars
+
+Once every car-build card (Car Type, Country, Brand, Decade, Performance
+Class) has a result, the **Matching Cars** button opens a list of every
+stock car in the roster that actually fulfils that exact combo - same
+searchable, per-column-filterable table as Show Data, just scoped to what
+you could actually drive for this roll instead of the full 636. A car
+counts as a match if its stock Type/Country/Brand/Decade line up (Any
+cards impose no constraint) and it can reach the rolled Performance Class
+without tuning down - respecting Stock Cars Only live, same as everywhere
+else that class headroom matters. The button stays disabled until a full
+car build exists (Reset Spin disables it again).
 
 ### Reset Spin
 
