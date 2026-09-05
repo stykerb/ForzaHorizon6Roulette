@@ -79,6 +79,8 @@
   const LS_ALWAYS_ANY = "fh6r-always-any-v1";
   const LS_MULTIPLIERS = "fh6r-weight-multipliers-v1";
   const LS_JAPANIZE_LEXUS_ACURA = "fh6r-japanize-lexus-acura-v1";
+  const LS_CHAMPIONSHIP_MODE = "fh6r-championship-mode-v1";
+  const LS_ANARCHY_MODE = "fh6r-anarchy-mode-v1";
   const MAX_HISTORY = 30;
 
   function countryName(id) {
@@ -137,6 +139,12 @@
   // lists both as Japanese for display purposes - this makes the Country
   // cascade agree with that instead of the game's USA grouping).
   let japanizeLexusAcura = loadJSON(LS_JAPANIZE_LEXUS_ACURA, true);
+  // Championship Mode: Spin All (and its own leg Spin buttons) generate 3
+  // races instead of 1 - see the "championship generator" section below for
+  // the actual roll logic. Anarchy Mode only changes anything while
+  // Championship Mode is also on.
+  let championshipMode = loadJSON(LS_CHAMPIONSHIP_MODE, false);
+  let anarchyMode = loadJSON(LS_ANARCHY_MODE, false);
 
   function persistFilters() {
     saveJSON(LS_FILTERS, disabledIds);
@@ -155,6 +163,8 @@
     saveJSON(LS_WHEELSPIN_ANIM, wheelspinAnimEnabled);
     saveJSON(LS_ALWAYS_ANY, alwaysAny);
     saveJSON(LS_JAPANIZE_LEXUS_ACURA, japanizeLexusAcura);
+    saveJSON(LS_CHAMPIONSHIP_MODE, championshipMode);
+    saveJSON(LS_ANARCHY_MODE, anarchyMode);
   }
   function persistMultipliers() {
     saveJSON(LS_MULTIPLIERS, multipliers);
@@ -450,6 +460,151 @@
     return tryStage(0);
   }
 
+  // ---- championship generator ---------------------------------------------
+  // A Championship (in-game sense) is 3 races run back to back with one car
+  // build. Default mode keeps every leg on the same "surface" (see
+  // data/raceSurfaces.js - Road/Street/Dirt/Cross Country, each covering
+  // that surface's Circuit+Sprint-style ids); Anarchy Mode drops that and
+  // lets each leg pick its own surface independently. Touge Battle and Drag
+  // Racing have no surface and are never picked here, in either mode - FH6
+  // doesn't build championships out of either. Only the final leg (index 2)
+  // may land on a long track, still subject to Exclude Long Tracks. No leg
+  // ever repeats another leg's specific race.
+  const CHAMPIONSHIP_TYPE_IDS = new Set(RACE_SURFACES.flatMap((s) => s.typeIds));
+
+  // Same weighting the Race Type card itself uses (rarity-by-race-count,
+  // Weighted-by-rarity toggle, and any manual multiplier), applied per race
+  // type id rather than per RACE_TYPES item - legs weight-pick a *race*
+  // (via its type), not a type directly, so specific races of a more common
+  // type are individually more likely, matching "roll type then uniform
+  // specific race" semantics collapsed into one weighted draw.
+  function championshipTypeWeight(typeId) {
+    return appliedWeight(categoryByKey.race, typeId, RACE_COUNTS_BY_TYPE.get(typeId) || 0);
+  }
+
+  // The one surface a currently-rolled non-Anarchy championship's 3 legs all
+  // share (derived from leg 1, same as every other leg by construction) -
+  // null in Anarchy Mode, or if nothing's been rolled yet.
+  function championshipCurrentSurface() {
+    if (anarchyMode || !current.championshipLegs) return null;
+    const typeId = current.championshipLegs[0].race.id;
+    return RACE_SURFACES.find((s) => s.typeIds.includes(typeId)) || null;
+  }
+
+  // Every race type a leg could land on right now, filters applied: the
+  // whole combined championship pool in Anarchy Mode (or when no surface is
+  // pinned yet), otherwise just the given surface's own ids.
+  function championshipAllowedTypeIds(surface) {
+    const disabledRace = new Set(disabledIds.race);
+    const ids = anarchyMode || !surface ? [...CHAMPIONSHIP_TYPE_IDS] : surface.typeIds;
+    return new Set(ids.filter((id) => !disabledRace.has(id)));
+  }
+
+  function championshipLegPool(allowedTypeIds, legIndex, excludeRaceIds) {
+    const disabledRace = new Set(disabledIds.race);
+    return INDIVIDUAL_RACES.filter(
+      (r) =>
+        allowedTypeIds.has(r.typeId) &&
+        !disabledRace.has(r.typeId) &&
+        !excludeRaceIds.has(r.id) &&
+        (legIndex === 2 || !LONG_TRACK_IDS.has(r.id)) &&
+        (!excludeLongTracks || !LONG_TRACK_IDS.has(r.id))
+    );
+  }
+
+  function championshipPick(pool) {
+    if (pool.length === 0) return null;
+    return weightedRandom(pool.map((r) => ({ item: r, weight: championshipTypeWeight(r.typeId) })));
+  }
+
+  // Weighted sampling order, without replacement - every item appears
+  // exactly once, earlier ones more likely to be heavier-weighted. Falls
+  // back to a uniform draw once the remaining weights are all zero (e.g.
+  // every leftover surface has every one of its race types disabled).
+  function weightedShuffle(items, weightFn) {
+    const remaining = items.map((it) => ({ it, w: weightFn(it) }));
+    const order = [];
+    while (remaining.length) {
+      const total = remaining.reduce((sum, x) => sum + x.w, 0);
+      let idx;
+      if (total <= 0) {
+        idx = Math.floor(Math.random() * remaining.length);
+      } else {
+        let r = Math.random() * total;
+        idx = remaining.findIndex((x) => (r -= x.w) <= 0);
+        if (idx === -1) idx = remaining.length - 1;
+      }
+      order.push(remaining[idx].it);
+      remaining.splice(idx, 1);
+    }
+    return order;
+  }
+
+  // Rolls all 3 legs at once - backtracking, same shape as rollChain: pick,
+  // recurse, and on a dead end retry the leg that caused it with a
+  // different pick before giving up on it. In non-Anarchy mode every
+  // surface with a viable 3-leg combo gets tried (favoring heavier-weighted
+  // surfaces first) before the whole roll is declared impossible; Anarchy
+  // Mode has just the one combined pool. Returns the 3 legs
+  // ([{race, specificRace}, ...]) on success, or null if every option is
+  // exhausted (surfaced by the caller as "no valid options").
+  function rollChampionshipLegs() {
+    const MAX_ATTEMPTS = 20000;
+    let attempts = 0;
+    const legs = [null, null, null];
+
+    function tryLegs(allowedTypeIds, legExcludeSets, usedRaceIds, i) {
+      if (i >= 3) return true;
+      for (;;) {
+        if (++attempts > MAX_ATTEMPTS) return false;
+        const pool = championshipLegPool(allowedTypeIds, i, usedRaceIds).filter((r) => !legExcludeSets[i].has(r.id));
+        const pick = championshipPick(pool);
+        if (!pick) return false;
+        legs[i] = { race: RACE_TYPES.find((t) => t.id === pick.typeId), specificRace: pick };
+        usedRaceIds.add(pick.id);
+        if (tryLegs(allowedTypeIds, legExcludeSets, usedRaceIds, i + 1)) return true;
+        usedRaceIds.delete(pick.id);
+        legExcludeSets[i].add(pick.id);
+      }
+    }
+
+    if (anarchyMode) {
+      const allowed = championshipAllowedTypeIds(null);
+      return tryLegs(allowed, [new Set(), new Set(), new Set()], new Set(), 0) ? legs : null;
+    }
+
+    const disabledRace = new Set(disabledIds.race);
+    const eligibleSurfaces = RACE_SURFACES.filter((s) => s.typeIds.some((id) => !disabledRace.has(id)));
+    const surfaceOrder = weightedShuffle(eligibleSurfaces, (s) => s.typeIds.reduce((sum, id) => sum + (disabledRace.has(id) ? 0 : championshipTypeWeight(id)), 0));
+    for (const surface of surfaceOrder) {
+      legs[0] = legs[1] = legs[2] = null;
+      const allowed = championshipAllowedTypeIds(surface);
+      if (tryLegs(allowed, [new Set(), new Set(), new Set()], new Set(), 0)) return legs;
+    }
+    return null;
+  }
+
+  // Respins a single leg in place, keeping the other 2 legs' specific races
+  // reserved (never duplicated) and the championship's surface fixed (non-
+  // Anarchy) or free (Anarchy) - same rules as a fresh roll, just scoped to
+  // one leg.
+  function spinChampionshipLeg(i) {
+    if (!current.championshipLegs) return;
+    const surface = championshipCurrentSurface();
+    const allowed = championshipAllowedTypeIds(surface);
+    const usedRaceIds = new Set(current.championshipLegs.filter((leg, idx) => idx !== i).map((leg) => leg.specificRace.id));
+    const pick = championshipPick(championshipLegPool(allowed, i, usedRaceIds));
+    if (!pick) {
+      showToast("No valid options for this leg - check filters.");
+      return;
+    }
+    const changed = current.championshipLegs[i].specificRace.id !== pick.id;
+    current.championshipLegs[i] = { race: RACE_TYPES.find((t) => t.id === pick.typeId), specificRace: pick };
+    renderChampionshipLegs();
+    if (changed) flashChampionshipLeg(i);
+    persistCurrent();
+  }
+
   // ---- DOM building ----------------------------------------------------
   const roots = { race: document.getElementById("race-categories"), car: document.getElementById("car-categories") };
   const cardsByKey = {};
@@ -495,6 +650,15 @@
       note.className = "card-note";
       note.textContent = cat.note;
       card.appendChild(note);
+    }
+    if (cat.key === "race") {
+      // Hidden outside Championship Mode - see refreshChampionshipUI, which
+      // toggles this alongside disabling this card's own Spin button.
+      const champNote = document.createElement("div");
+      champNote.className = "card-note hidden";
+      champNote.dataset.role = "championship-note";
+      champNote.textContent = "Championship Mode is on: this filters which race types the 3-leg championship below can use. This card's own Spin is disabled while it's on.";
+      card.appendChild(champNote);
     }
     if (cat.allowAny) {
       const alwaysRow = document.createElement("label");
@@ -695,6 +859,86 @@
     resultEl.classList.add("flash");
   }
 
+  // ---- championship legs: rendering ----------------------------------------
+  const championshipLegCards = [];
+
+  function renderChampionshipLegs() {
+    const legs = current.championshipLegs;
+    for (let i = 0; i < 3; i++) {
+      const card = championshipLegCards[i];
+      if (!card) continue;
+      const raceTypeEl = card.querySelector('[data-role="leg-race-type"]');
+      const specificRaceEl = card.querySelector('[data-role="leg-specific-race"]');
+      const leg = legs ? legs[i] : null;
+      if (!leg) {
+        raceTypeEl.innerHTML = `<span class="placeholder">Spin to reveal</span>`;
+        specificRaceEl.textContent = "";
+        continue;
+      }
+      raceTypeEl.textContent = leg.race.name;
+      raceTypeEl.style.color = leg.race.color || "";
+      specificRaceEl.textContent = leg.specificRace.name;
+    }
+    const surfaceLabelEl = document.getElementById("championship-surface-label");
+    if (anarchyMode) {
+      surfaceLabelEl.textContent = "Anarchy Mode - legs can mix race surfaces";
+    } else {
+      const surface = championshipCurrentSurface();
+      surfaceLabelEl.textContent = surface ? `Surface: ${surface.name}` : "";
+    }
+  }
+
+  function flashChampionshipLeg(i) {
+    const card = championshipLegCards[i];
+    if (!card) return;
+    card.classList.remove("flash");
+    void card.offsetWidth;
+    card.classList.add("flash");
+  }
+
+  // Builds the 3 static leg cards once - their content is populated
+  // entirely by renderChampionshipLegs/flashChampionshipLeg above.
+  function buildChampionshipLegCards() {
+    const wrap = document.getElementById("championship-legs");
+    for (let i = 0; i < 3; i++) {
+      const isFinal = i === 2;
+      const card = document.createElement("section");
+      card.className = "card leg-card";
+      card.dataset.leg = String(i);
+      card.innerHTML = `
+        <div class="card-header">
+          <span class="card-icon">\u{1F3C6}</span>
+          <span class="card-label">Leg ${i + 1}${isFinal ? " · Final" : ""}</span>
+        </div>
+        <div class="card-result" data-role="leg-race-type"><span class="placeholder">Spin to reveal</span></div>
+        <div class="card-sub" data-role="leg-specific-race"></div>
+        ${isFinal ? `<div class="card-note">Can land on a long track (Goliath, Colossus, etc.) unless Exclude Long Tracks is on - the other 2 legs never do.</div>` : ""}
+        <div class="card-actions">
+          <button type="button" class="btn btn-spin" data-role="leg-spin">\u{1F3B2} Spin Leg</button>
+        </div>
+      `;
+      card.querySelector('[data-role="leg-spin"]').addEventListener("click", () => spinChampionshipLeg(i));
+      wrap.appendChild(card);
+      championshipLegCards.push(card);
+    }
+  }
+
+  // Shows/hides the Specific Race card vs. the championship-legs block, and
+  // repurposes the Race Type card (its own Spin no longer means anything
+  // once each leg picks its own race type - its Filters stay live, since
+  // that's still exactly what restricts which race types the championship
+  // can use). Called on init and whenever Championship Mode is toggled.
+  function refreshChampionshipUI() {
+    cardsByKey.specificRace.classList.toggle("hidden", championshipMode);
+    document.getElementById("championship-wrap").classList.toggle("hidden", !championshipMode);
+    const raceCard = cardsByKey.race;
+    raceCard.querySelector('[data-role="championship-note"]').classList.toggle("hidden", !championshipMode);
+    const raceSpinBtn = raceCard.querySelector('[data-role="spin-one"]');
+    raceSpinBtn.disabled = championshipMode;
+    raceSpinBtn.title = championshipMode ? 'Spun automatically as part of the championship below' : "";
+    renderChampionshipLegs();
+  }
+
   function spinOne(key, animate) {
     const stages = stagesFrom(key);
     // stages[0] is the card actually spun - always rerolls. Everything
@@ -724,6 +968,8 @@
       current[cat.key] = null;
       renderResult(cat);
     });
+    current.championshipLegs = null;
+    renderChampionshipLegs();
     persistCurrent();
     refreshAllCounts();
     showToast("Results cleared - every card rolls fresh now.");
@@ -733,12 +979,22 @@
   // used - populates `current` with the final, already-guaranteed-valid
   // results. Separated from finalizeSpinAll so the wheelspin animation can
   // run the real roll up front (silently) and only defer how/when the
-  // results get *revealed*, never re-deriving or faking them.
+  // results get *revealed*, never re-deriving or faking them. Race/Specific
+  // Race are only rolled outside Championship Mode - inside it, the 3
+  // championship legs take their place (current.race/specificRace stay
+  // null, same as any other never-rolled card).
   function computeSpinAllChains() {
     CATEGORIES.forEach((cat) => {
       current[cat.key] = null;
     });
-    const okRace = rollChain(["race", "specificRace"]);
+    current.championshipLegs = null;
+    let okRace;
+    if (championshipMode) {
+      current.championshipLegs = rollChampionshipLegs();
+      okRace = !!current.championshipLegs;
+    } else {
+      okRace = rollChain(["race", "specificRace"]);
+    }
     const okSeason = rollChain(["season"]);
     const okCar = rollChain([...CASCADE_ORDER, "class"]);
     return { okRace, okSeason, okCar };
@@ -749,6 +1005,8 @@
       renderResult(cat);
       flashResult(cat);
     });
+    renderChampionshipLegs();
+    if (current.championshipLegs) championshipLegCards.forEach((card, i) => flashChampionshipLeg(i));
     persistCurrent();
     refreshAllCounts();
     if (!result.okRace || !result.okSeason || !result.okCar) {
@@ -838,8 +1096,35 @@
     counterDisplayedValue = newValue;
   }
 
-  function buildWheelCol(key) {
+  // Championship legs aren't real CATEGORIES entries (there are 3 of them,
+  // each with its own Race Type + Specific Race), so they don't have a
+  // categoryByKey[key]/current[key] pair for the rest of this section to
+  // read directly. This resolves any wheel-stage key - "champLeg<i>-race",
+  // "champLeg<i>-specificRace", or a normal CATEGORIES key - to the same
+  // {cat, pool, target} shape either way, so buildWheelCol/buildStage/
+  // startSpin below never need to know which kind they're looking at.
+  function wheelDescriptor(key) {
+    const champRaceMatch = /^champLeg(\d)-race$/.exec(key);
+    const champSpecMatch = /^champLeg(\d)-specificRace$/.exec(key);
+    if (champRaceMatch || champSpecMatch) {
+      const i = Number((champRaceMatch || champSpecMatch)[1]);
+      const leg = current.championshipLegs[i];
+      const surface = championshipCurrentSurface();
+      const allowed = championshipAllowedTypeIds(surface);
+      if (champRaceMatch) {
+        const disabledRace = new Set(disabledIds.race);
+        const pool = RACE_TYPES.filter((t) => allowed.has(t.id) && !disabledRace.has(t.id)).map((item) => ({ item, weight: 1 }));
+        return { cat: { key, icon: "\u{1F3C1}", label: `Leg ${i + 1} Race Type`, color: (item) => item.color }, pool, target: leg.race };
+      }
+      const excludeOther = new Set(current.championshipLegs.filter((l, idx) => idx !== i).map((l) => l.specificRace.id));
+      const pool = championshipLegPool(allowed, i, excludeOther).map((item) => ({ item, weight: 1 }));
+      return { cat: { key, icon: "\u{1F5FA}️", label: `Leg ${i + 1} Race`, color: (item) => raceTypeColor(item.typeId) }, pool, target: leg.specificRace };
+    }
     const cat = categoryByKey[key];
+    return { cat, pool: injectAny(realPoolFor(cat), cat), target: current[key] };
+  }
+
+  function buildWheelCol(key, cat) {
     const col = document.createElement("div");
     col.className = "wheel-col";
     col.dataset.key = key;
@@ -974,9 +1259,14 @@
   }
 
   // Two gated phases, each advanced by hand:
-  //   "triple" - one event, the three race cards spinning together (staggered
-  //              stops, 0.5s apart, left to right). Exactly one "Super
-  //              Wheelspin," so its counter only ever reads 1 or 0.
+  //   "triple" - the three race cards spinning together (staggered stops,
+  //              0.5s apart, left to right), each one event: a "Super
+  //              Wheelspin." Outside Championship Mode that's the whole
+  //              phase - exactly one, so its counter only ever reads 1 or 0.
+  //              In Championship Mode it repeats once per leg (3 Super
+  //              Wheelspins total): leg 1 spins Race Type + Specific Race +
+  //              Season together same as always, legs 2-3 drop Season
+  //              (already decided) down to just their own 2 reels.
   //   "single" - the five car-build cards, one at a time. Its counter is the
   //              count of those five still un-landed.
   // The user drives every step: pressing "Spin" starts the current stage,
@@ -987,19 +1277,33 @@
     wheelspinActive = true;
     counterDisplayedValue = null; // fresh open: first counter render should snap, not roll
 
+    // Snapshot once, up front - current.championshipLegs is already the
+    // real, final result by the time this runs (see computeSpinAllChains),
+    // and reading it fresh on every call below would be wrong anyway if
+    // Championship Mode somehow got toggled mid-animation.
+    const champLegs = championshipMode ? current.championshipLegs : null;
+
     let phase = "triple"; // "triple" | "single"
+    let champLegIdx = 0; // which Super Wheelspin (0-2) - only moves while champLegs is set
     let singleIdx = 0;
     let stageLanded = false;
     let cancelled = false;
 
     function currentKeys() {
-      return phase === "triple" ? TRIPLE_KEYS : [SINGLE_KEYS[singleIdx]];
+      if (phase === "triple") {
+        if (!champLegs) return TRIPLE_KEYS;
+        const keys = [`champLeg${champLegIdx}-race`, `champLeg${champLegIdx}-specificRace`];
+        if (champLegIdx === 0) keys.push("season");
+        return keys;
+      }
+      return [SINGLE_KEYS[singleIdx]];
     }
 
     function updateCounter() {
       let remaining, label;
       if (phase === "triple") {
-        remaining = stageLanded ? 0 : 1;
+        const totalSuper = champLegs ? champLegs.length : 1;
+        remaining = totalSuper - champLegIdx - (stageLanded ? 1 : 0);
         label = `Super Wheelspin${remaining === 1 ? "" : "s"} Remaining`;
       } else {
         remaining = SINGLE_KEYS.length - singleIdx - (stageLanded ? 1 : 0);
@@ -1014,10 +1318,10 @@
       wheelspinStageEl.className = phase === "triple" ? "wheelspin-stage wheelspin-stage-triple" : "wheelspin-stage wheelspin-stage-single";
       wheelspinStageEl.innerHTML = "";
       currentKeys().forEach((key) => {
-        const col = buildWheelCol(key);
+        const desc = wheelDescriptor(key);
+        const col = buildWheelCol(key, desc.cat);
         wheelspinStageEl.appendChild(col);
-        const cat = categoryByKey[key];
-        renderIdlePreview(col.querySelector('[data-role="wheel-reel"]'), injectAny(realPoolFor(cat), cat), cat);
+        renderIdlePreview(col.querySelector('[data-role="wheel-reel"]'), desc.pool, desc.cat);
       });
     }
 
@@ -1029,14 +1333,14 @@
       wheelspinActionBtn.disabled = true;
       const keys = currentKeys();
       // 50% longer than the original [1000,1500,2000]/[1100] pacing - the
-      // extra time is what the pre-reveal white flash (see animateReel) needs.
-      const durations = phase === "triple" ? [1500, 2250, 3000] : [1650];
+      // extra time is what the pre-reveal white flash (see animateReel)
+      // needs. Sliced down to 2 for a Championship leg without Season.
+      const durations = (phase === "triple" ? [1500, 2250, 3000] : [1650]).slice(0, keys.length);
       let toLand = keys.length;
       keys.forEach((key, i) => {
-        const cat = categoryByKey[key];
+        const desc = wheelDescriptor(key);
         const reel = wheelspinStageEl.querySelector(`[data-key="${key}"] [data-role="wheel-reel"]`);
-        const pool = injectAny(realPoolFor(cat), cat);
-        animateReel(reel, pool, current[key], cat, durations[i], () => {
+        animateReel(reel, desc.pool, desc.target, desc.cat, durations[i], () => {
           if (cancelled) return;
           toLand--;
           if (toLand === 0) {
@@ -1051,8 +1355,12 @@
 
     function advanceStage() {
       if (phase === "triple") {
-        phase = "single";
-        singleIdx = 0;
+        if (champLegs && champLegIdx < champLegs.length - 1) {
+          champLegIdx++;
+        } else {
+          phase = "single";
+          singleIdx = 0;
+        }
       } else if (singleIdx < SINGLE_KEYS.length - 1) {
         singleIdx++;
       } else {
@@ -1108,6 +1416,9 @@
       const item = current[cat.key];
       snapshot.values[cat.key] = item ? item.name : null;
     });
+    if (current.championshipLegs) {
+      snapshot.championship = current.championshipLegs.map((leg) => ({ race: leg.race.name, specificRace: leg.specificRace.name }));
+    }
     history.unshift(snapshot);
     if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
     persistHistory();
@@ -1125,7 +1436,13 @@
       const row = document.createElement("div");
       row.className = "history-row";
       const date = new Date(entry.ts);
-      const parts = CATEGORIES.map((cat) => entry.values[cat.key] || "—");
+      let parts;
+      if (entry.championship) {
+        const legsText = entry.championship.map((leg, i) => `${leg.specificRace}${i === entry.championship.length - 1 ? " (Final)" : ""}`).join(" → ");
+        parts = [`\u{1F3C6} ${legsText}`, ...CATEGORIES.filter((cat) => cat.key !== "race" && cat.key !== "specificRace").map((cat) => entry.values[cat.key] || "—")];
+      } else {
+        parts = CATEGORIES.map((cat) => entry.values[cat.key] || "—");
+      }
       row.innerHTML = `
         <span class="history-time">${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
         <span class="history-parts">${parts.join(" · ")}</span>
@@ -1144,7 +1461,20 @@
 
   // ---- Discord/Slack-friendly markdown table for Copy Challenge -----------
   function buildCurrentChallengeText() {
-    const rows = CATEGORIES.map((cat) => [cat.label, current[cat.key] ? current[cat.key].name : "—"]);
+    const rows = [];
+    if (current.championshipLegs) {
+      current.championshipLegs.forEach((leg, i) => {
+        const label = i === current.championshipLegs.length - 1 ? `Leg ${i + 1} (Final)` : `Leg ${i + 1}`;
+        rows.push([label, `${leg.race.name} — ${leg.specificRace.name}`]);
+      });
+    } else {
+      rows.push([categoryByKey.race.label, current.race ? current.race.name : "—"]);
+      rows.push([categoryByKey.specificRace.label, current.specificRace ? current.specificRace.name : "—"]);
+    }
+    CATEGORIES.forEach((cat) => {
+      if (cat.key === "race" || cat.key === "specificRace") return;
+      rows.push([cat.label, current[cat.key] ? current[cat.key].name : "—"]);
+    });
     const col1 = Math.max("Category".length, ...rows.map((r) => r[0].length));
     const col2 = Math.max("Result".length, ...rows.map((r) => r[1].length));
     const pad = (s, w) => s + " ".repeat(w - s.length);
@@ -1206,6 +1536,27 @@
       dataModalBuilt.cars = false;
       persistSettings();
       refreshAllCounts();
+    });
+  })();
+  // Neither of these touches any car/race pool count, so skip
+  // refreshAllCounts() too - just persist and re-render the championship UI
+  // (whether the legs block is shown at all, and its surface label).
+  (function () {
+    const el = document.getElementById("championship-mode-toggle");
+    el.checked = championshipMode;
+    el.addEventListener("change", (e) => {
+      championshipMode = e.target.checked;
+      persistSettings();
+      refreshChampionshipUI();
+    });
+  })();
+  (function () {
+    const el = document.getElementById("anarchy-mode-toggle");
+    el.checked = anarchyMode;
+    el.addEventListener("change", (e) => {
+      anarchyMode = e.target.checked;
+      persistSettings();
+      renderChampionshipLegs();
     });
   })();
 
@@ -1652,5 +2003,7 @@
   // ---- init -------------------------------------------------------------
   document.getElementById("data-publish-date").textContent = DATA_PUBLISH_DATE;
   CATEGORIES.forEach(buildCard);
+  buildChampionshipLegCards();
+  refreshChampionshipUI();
   renderHistory();
 })();

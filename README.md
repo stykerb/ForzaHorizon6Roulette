@@ -65,6 +65,9 @@ the starting data set" section below whenever `data/cars.js`,
   game's own USA grouping. Affects the Country cascade/JDM preset only - the
   Brand card's own "Japan" origin label for Lexus/Acura doesn't change either
   way, since that's a fact about the brand, not the game's filter grouping.
+- **Championship Mode** (off by default) — see below.
+- **Anarchy Mode** (off by default) — only changes anything while
+  Championship Mode is also on; see below.
 
 Each card also has its own **🎯 Always land on "Any"** toggle, which pins
 that one card to Any on every spin (Spin All or its own Spin button) —
@@ -111,6 +114,40 @@ the roll so far. Cars can be tuned *up*, never down, so:
 - every car can be tuned up to at least S2;
 - reaching **R** needs a stock S2-or-higher car in the matching pool;
 - reaching **X** needs a stock R-or-higher car in the matching pool.
+
+### Championship Mode
+
+Turns Spin All (and its own **Spin Leg** buttons) into a 3-race championship
+— one car build, 3 races run back to back — matching how FH6 itself builds
+Championships. Turning it on hides the Specific Race card in favor of 3
+**Leg** cards (Leg 1, Leg 2, Leg 3 · Final), each with its own Race Type and
+Specific Race; the Race Type card stays put but only as a filter now (its own
+Spin is disabled) — Season and the whole Car Build section are unaffected and
+still shared across all 3 legs, same as any other roll.
+
+By default every leg stays on the same **surface** — Road Racing, Street
+Racing, Dirt Racing, or Cross Country — so a championship can freely mix a
+surface's Circuit and Sprint variants (e.g. Road Racing - Circuit and Road
+Racing - Sprint) but never crosses surfaces. Touge Battle and Drag Racing
+have no surface and are never picked for a championship leg, in either mode
+— FH6 doesn't build multi-race championships out of either. **Anarchy Mode**
+drops the same-surface rule, letting each leg land on any championship-
+eligible surface independently.
+
+Two more rules hold regardless of mode:
+- No leg ever repeats another leg's specific race.
+- Only the **final** leg (Leg 3) may land on one of FH6's four long tracks
+  (The Titan, The Gauntlet, The Colossus, The Goliath) — legs 1-2 never do.
+  Exclude Long Tracks still applies on top of that, same as everywhere else:
+  on, and even Leg 3 won't get one.
+
+Every other filter and weighting rule still applies exactly as it does
+outside Championship Mode — the Race Type card's own filter, Weighted by
+rarity, and manual weight multipliers all shape which legs come up, same as
+a normal Race Type/Specific Race roll. If the filters leave no valid 3-leg
+combination at all (e.g. every championship-eligible race type disabled),
+the legs show "Spin to reveal" and a toast explains why, same as any other
+impossible-combo case elsewhere in the app.
 
 ### Colors
 
@@ -177,6 +214,7 @@ index.html              Page shell, loads data files then js/app.js
 css/styles.css           All styling
 js/app.js                App logic — rendering, spinning, filters, persistence
 data/raceTypes.js         Race type categories (Road/Street/Touge/Drag/Dirt/Cross Country)
+data/raceSurfaces.js      Groups raceTypes.js ids into Championship Mode's 4 surfaces
 data/individualRaces.js   Every named race, tagged with a raceTypes.js id
 data/carTypes.js          Car build/category types
 data/brands.js            Manufacturers (with country of origin)
@@ -215,6 +253,7 @@ If a manufacturer or race is renamed in-game, keep the old `id` and just
 update the `name`.
 
 - `data/raceTypes.js` — `{ id, name, desc, color }` (`color` should match the in-game category color; road/dirt/cross-country's two ids each share one color, same as in-game)
+- `data/raceSurfaces.js` — `{ id, name, typeIds }` (`typeIds` references one or more ids in `data/raceTypes.js`; Championship Mode only ever picks race types listed here, so a race type with no surface — Touge Battle, Drag Racing — never appears in a championship)
 - `data/individualRaces.js` — `{ id, name, typeId }` (`typeId` references an id in `data/raceTypes.js`; adding a brand-new race *type* — not just a new race — means adding it to `raceTypes.js` first)
 - `data/carTypes.js` — `{ id, name }`
 - `data/brands.js` — `{ id, name, country }` (`country` references an id in `data/countries.js`)

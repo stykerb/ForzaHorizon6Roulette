@@ -64,6 +64,16 @@
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
         <span class="toggle-label">Treat Lexus/Acura as Japan <em>(the game itself groups them under USA)</em></span>
       </label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="championship-mode-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Championship Mode <em>(3 races, one car, same race surface by default)</em></span>
+      </label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="anarchy-mode-toggle">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Anarchy Mode <em>(Championship Mode only - legs can mix race surfaces)</em></span>
+      </label>
     </div>
 
     <section class="group-section preset-section">
@@ -75,6 +85,10 @@
     <section class="group-section">
       <h2 class="group-heading">🏁 Race</h2>
       <div id="race-categories" class="grid"></div>
+      <div id="championship-wrap" class="championship-wrap hidden">
+        <p id="championship-surface-label" class="championship-surface-label"></p>
+        <div id="championship-legs" class="grid"></div>
+      </div>
     </section>
 
     <section class="group-section">
@@ -221,6 +235,7 @@
   </div>
 
   <script src="data/raceTypes.js"></script>
+  <script src="data/raceSurfaces.js"></script>
   <script src="data/individualRaces.js"></script>
   <script src="data/carTypes.js"></script>
   <script src="data/brands.js"></script>
