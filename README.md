@@ -127,7 +127,13 @@ straight into Discord/Slack and it renders as a clean, aligned table.
 
 Opens a searchable browser of every car (636) and every race (81) FH6
 Roulette knows about, straight from `data/cars.js` and
-`data/individualRaces.js`.
+`data/individualRaces.js`. Besides the search box, every column has its own
+filter (a dropdown for Make/Type/Country/Class/Race Type, a text box for
+Year/Model/Stock PI) - all of them combine with each other and the search
+box at once. The Cars tab's Model column isn't stored data - it's derived
+by stripping the leading year and the make off `name` (which is always
+"`<year> <make> <model>`"), so "1964 Ford Mustang GT Coupe" shows as
+Year 1964 / Make Ford / Model "Mustang GT Coupe".
 
 ### Reset Spin
 

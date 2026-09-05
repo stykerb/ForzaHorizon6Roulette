@@ -1298,38 +1298,70 @@
     return item ? item.name : id;
   }
 
-  function buildDataTable(tab) {
-    if (tab === "cars") {
-      const rows = CARS.map(
-        (c) => `
-        <tr>
-          <td>${c.name}</td>
-          <td>${nameOf(BRANDS, c.make)}</td>
-          <td>${nameOf(CAR_TYPES, c.type)}</td>
-          <td>${nameOf(COUNTRIES, c.country)}</td>
-          <td>${c.year}</td>
-          <td>${classDisplay(c.class)}</td>
-          <td>${c.pi}</td>
-        </tr>`
-      ).join("");
-      return `
-        <table class="data-table" data-role="data-table">
-          <thead><tr><th>Name</th><th>Make</th><th>Type</th><th>Country</th><th>Year</th><th>Class</th><th>PI</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>`;
-    }
-    const rows = INDIVIDUAL_RACES.map(
-      (r) => `
-      <tr>
-        <td>${r.name}</td>
-        <td>${raceTypeName(r.typeId)}</td>
-      </tr>`
-    ).join("");
+  // In-game car names are always "<year> <make> <model>" (data/cars.js's own
+  // convention - see its header comment). Stripping the leading year and
+  // the make (from data/brands.js, which can itself be multi-word, e.g.
+  // "Aston Martin") leaves exactly the model - "1964 Ford Mustang GT Coupe"
+  // becomes "Mustang GT Coupe". Verified against all 636 cars with zero
+  // exceptions before relying on it here.
+  function deriveCarModel(car) {
+    let rest = car.name.replace(/^\d{4}\s+/, "");
+    const brandName = nameOf(BRANDS, car.make);
+    if (rest === brandName) return "";
+    if (rest.startsWith(brandName + " ")) return rest.slice(brandName.length + 1);
+    return rest; // shouldn't happen given the verification above, but fail soft
+  }
+
+  // Column definitions drive both the header/filter row and each row's
+  // cells, so the two can never drift out of sync. `type: "select"` gets a
+  // dropdown of every distinct value present; `type: "text"` gets a
+  // substring filter input. Combined with the global search box above the
+  // table - a row must match both to show.
+  const CAR_TABLE_COLUMNS = [
+    { key: "year", label: "Year", type: "text", value: (c) => String(c.year) },
+    { key: "make", label: "Make", type: "select", value: (c) => nameOf(BRANDS, c.make) },
+    { key: "model", label: "Model", type: "text", value: (c) => deriveCarModel(c) },
+    { key: "type", label: "Type", type: "select", value: (c) => nameOf(CAR_TYPES, c.type) },
+    { key: "country", label: "Country", type: "select", value: (c) => nameOf(COUNTRIES, c.country) },
+    { key: "class", label: "Class", type: "select", value: (c) => classDisplay(c.class) },
+    { key: "pi", label: "Stock PI", type: "text", value: (c) => String(c.pi) },
+  ];
+  const RACE_TABLE_COLUMNS = [
+    { key: "name", label: "Name", type: "text", value: (r) => r.name },
+    { key: "raceType", label: "Race Type", type: "select", value: (r) => raceTypeName(r.typeId) },
+  ];
+
+  function buildFilterableTable(columns, items) {
+    const headerCells = columns.map((col) => `<th>${col.label}</th>`).join("");
+    const filterCells = columns
+      .map((col) => {
+        if (col.type === "select") {
+          const values = [...new Set(items.map((item) => col.value(item)))].sort((a, b) => a.localeCompare(b));
+          const options = values.map((v) => `<option value="${v}">${v}</option>`).join("");
+          return `<th><select class="data-col-filter" data-col="${col.key}" aria-label="Filter ${col.label}"><option value="">All</option>${options}</select></th>`;
+        }
+        return `<th><input type="text" class="data-col-filter" data-col="${col.key}" placeholder="Filter..." aria-label="Filter ${col.label}"></th>`;
+      })
+      .join("");
+    const rows = items
+      .map((item) => {
+        const cells = columns.map((col) => `<td data-col="${col.key}">${col.value(item)}</td>`).join("");
+        return `<tr>${cells}</tr>`;
+      })
+      .join("");
     return `
       <table class="data-table" data-role="data-table">
-        <thead><tr><th>Name</th><th>Race Type</th></tr></thead>
+        <thead>
+          <tr>${headerCells}</tr>
+          <tr class="data-table-filter-row">${filterCells}</tr>
+        </thead>
         <tbody>${rows}</tbody>
       </table>`;
+  }
+
+  function buildDataTable(tab) {
+    if (tab === "cars") return buildFilterableTable(CAR_TABLE_COLUMNS, CARS);
+    return buildFilterableTable(RACE_TABLE_COLUMNS, INDIVIDUAL_RACES);
   }
 
   function showDataTab(tab) {
@@ -1343,6 +1375,10 @@
       wrap.innerHTML = buildDataTable(tab);
       dataModalBody.appendChild(wrap);
       dataModalBuilt[tab] = true;
+      wrap.querySelectorAll(".data-col-filter").forEach((el) => {
+        el.addEventListener("input", () => filterDataTable(dataSearch.value));
+        el.addEventListener("change", () => filterDataTable(dataSearch.value));
+      });
     }
     dataModalBody.querySelectorAll("[data-tab-panel]").forEach((p) => {
       p.classList.toggle("hidden", p.dataset.tabPanel !== tab);
@@ -1355,8 +1391,18 @@
     const t = term.trim().toLowerCase();
     const panel = dataModalBody.querySelector(`[data-tab-panel="${dataModalTab}"]`);
     if (!panel) return;
+    const colFilters = Array.from(panel.querySelectorAll(".data-col-filter"))
+      .map((el) => ({ col: el.dataset.col, isSelect: el.tagName === "SELECT", value: el.value.trim() }))
+      .filter((f) => f.value !== "");
     panel.querySelectorAll("tbody tr").forEach((row) => {
-      row.style.display = !t || row.textContent.toLowerCase().includes(t) ? "" : "none";
+      const matchesSearch = !t || row.textContent.toLowerCase().includes(t);
+      const matchesColumns = colFilters.every((f) => {
+        const cell = row.querySelector(`td[data-col="${f.col}"]`);
+        if (!cell) return true;
+        const cellText = cell.textContent;
+        return f.isSelect ? cellText === f.value : cellText.toLowerCase().includes(f.value.toLowerCase());
+      });
+      row.style.display = matchesSearch && matchesColumns ? "" : "none";
     });
   }
 
