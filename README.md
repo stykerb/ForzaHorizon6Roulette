@@ -120,10 +120,13 @@ the roll so far. Cars can be tuned *up*, never down, so:
 Turns Spin All (and its own **Spin Leg** buttons) into a 3-race championship
 — one car build, 3 races run back to back — matching how FH6 itself builds
 Championships. Turning it on hides the Specific Race card in favor of 3
-**Leg** cards (Leg 1, Leg 2, Leg 3 · Final), each with its own Race Type and
-Specific Race; the Race Type card stays put but only as a filter now (its own
-Spin is disabled) — Season and the whole Car Build section are unaffected and
-still shared across all 3 legs, same as any other roll.
+**Leg** cards (Leg 1, Leg 2, Leg 3 · Final), each showing its specific race
+as the main result and its race type underneath; Season and the whole Car
+Build section are unaffected and still shared across all 3 legs, same as any
+other roll. The Race Type card stays put, but only as a filter now (its own
+Spin is disabled) — since each leg picks its own race type, the card
+displays the championship's **surface** instead (or, in Anarchy Mode, that
+it's mixing surfaces, since there isn't just one).
 
 By default every leg stays on the same **surface** — Road Racing, Street
 Racing, Dirt Racing, or Cross Country — so a championship can freely mix a

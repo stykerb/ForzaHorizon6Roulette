@@ -867,25 +867,46 @@
     for (let i = 0; i < 3; i++) {
       const card = championshipLegCards[i];
       if (!card) continue;
-      const raceTypeEl = card.querySelector('[data-role="leg-race-type"]');
+      // The specific race is the interesting result, so it gets the big
+      // colored card-result slot (colored by its race type, same as the
+      // normal Specific Race card); the race type itself is the card-sub.
       const specificRaceEl = card.querySelector('[data-role="leg-specific-race"]');
+      const raceTypeEl = card.querySelector('[data-role="leg-race-type"]');
       const leg = legs ? legs[i] : null;
       if (!leg) {
-        raceTypeEl.innerHTML = `<span class="placeholder">Spin to reveal</span>`;
-        specificRaceEl.textContent = "";
+        specificRaceEl.innerHTML = `<span class="placeholder">Spin to reveal</span>`;
+        specificRaceEl.style.color = "";
+        raceTypeEl.textContent = "";
         continue;
       }
-      raceTypeEl.textContent = leg.race.name;
-      raceTypeEl.style.color = leg.race.color || "";
       specificRaceEl.textContent = leg.specificRace.name;
+      specificRaceEl.style.color = leg.race.color || "";
+      raceTypeEl.textContent = leg.race.name;
     }
-    const surfaceLabelEl = document.getElementById("championship-surface-label");
-    if (anarchyMode) {
-      surfaceLabelEl.textContent = "Anarchy Mode - legs can mix race surfaces";
-    } else {
-      const surface = championshipCurrentSurface();
-      surfaceLabelEl.textContent = surface ? `Surface: ${surface.name}` : "";
+    updateRaceTypeCardForChampionship();
+  }
+
+  // The Race Type card no longer has a roll of its own in Championship
+  // Mode (each leg picks its own), so it displays the championship's
+  // surface instead - Anarchy Mode has no single surface to show, so it
+  // names itself instead. No-op outside Championship Mode, where
+  // renderResult(categoryByKey.race) already shows the real thing.
+  function updateRaceTypeCardForChampionship() {
+    if (!championshipMode) return;
+    const resultEl = cardsByKey.race.querySelector('[data-role="result"]');
+    let text = null;
+    if (current.championshipLegs) {
+      text = anarchyMode ? "Anarchy Mode (mixed surfaces)" : (championshipCurrentSurface() || {}).name || null;
     }
+    if (!text) {
+      resultEl.innerHTML = `<span class="placeholder">Spin to reveal</span>`;
+      resultEl.classList.remove("is-any");
+      resultEl.style.color = "";
+      return;
+    }
+    resultEl.textContent = text;
+    resultEl.classList.toggle("is-any", anarchyMode);
+    resultEl.style.color = "";
   }
 
   function flashChampionshipLeg(i) {
@@ -910,9 +931,8 @@
           <span class="card-icon">\u{1F3C6}</span>
           <span class="card-label">Leg ${i + 1}${isFinal ? " · Final" : ""}</span>
         </div>
-        <div class="card-result" data-role="leg-race-type"><span class="placeholder">Spin to reveal</span></div>
-        <div class="card-sub" data-role="leg-specific-race"></div>
-        ${isFinal ? `<div class="card-note">Can land on a long track (Goliath, Colossus, etc.) unless Exclude Long Tracks is on - the other 2 legs never do.</div>` : ""}
+        <div class="card-result" data-role="leg-specific-race"><span class="placeholder">Spin to reveal</span></div>
+        <div class="card-sub" data-role="leg-race-type"></div>
         <div class="card-actions">
           <button type="button" class="btn btn-spin" data-role="leg-spin">\u{1F3B2} Spin Leg</button>
         </div>
@@ -936,6 +956,7 @@
     const raceSpinBtn = raceCard.querySelector('[data-role="spin-one"]');
     raceSpinBtn.disabled = championshipMode;
     raceSpinBtn.title = championshipMode ? 'Spun automatically as part of the championship below' : "";
+    if (!championshipMode) renderResult(categoryByKey.race); // restore its real current.race display
     renderChampionshipLegs();
   }
 
@@ -1109,8 +1130,12 @@
     if (champRaceMatch || champSpecMatch) {
       const i = Number((champRaceMatch || champSpecMatch)[1]);
       const leg = current.championshipLegs[i];
-      const surface = championshipCurrentSurface();
-      const allowed = championshipAllowedTypeIds(surface);
+      // Deliberately the FULL combined championship pool here, not just
+      // this leg's actual surface - scrolling through only the 1-2 types
+      // (and their races) the real surface allows would telegraph the
+      // surface before it's revealed. The real target is still spliced in
+      // correctly regardless of what's in this decorative pool.
+      const allowed = championshipAllowedTypeIds(null);
       if (champRaceMatch) {
         const disabledRace = new Set(disabledIds.race);
         const pool = RACE_TYPES.filter((t) => allowed.has(t.id) && !disabledRace.has(t.id)).map((item) => ({ item, weight: 1 }));
@@ -1175,6 +1200,27 @@
     const items = pool.map((p) => p.item);
     const preview = randomNoAdjacentRepeat(items, 3);
     track.innerHTML = preview
+      .map((item) => `<div class="wheel-slot"><div class="wheel-tile" style="color:${wheelItemColor(cat, item)}">${displayName(cat, item)}</div></div>`)
+      .join("");
+  }
+
+  // A reel that's already decided and never actually spins this stage
+  // (Season on a Championship leg after leg 1) - shown centered and
+  // "landed" (gold border, no flash) from the moment its stage appears,
+  // with the same 2 decorative neighbor rows a real landed reel would have.
+  function renderSettledReel(reel, pool, target, cat) {
+    const track = reel.querySelector(".wheel-reel-track");
+    const flash = reel.querySelector('[data-role="wheel-reel-flash"]');
+    reel.classList.remove("no-options");
+    reel.classList.add("landed");
+    flash.style.transition = "none";
+    flash.style.opacity = "0";
+    track.style.transition = "none";
+    track.style.transform = "translateY(0)";
+    const items = pool && pool.length ? pool.map((p) => p.item) : [target];
+    const above = randomNoAdjacentRepeat(items, 1, target.id)[0];
+    const below = randomNoAdjacentRepeat(items, 1, target.id)[0];
+    track.innerHTML = [above, target, below]
       .map((item) => `<div class="wheel-slot"><div class="wheel-tile" style="color:${wheelItemColor(cat, item)}">${displayName(cat, item)}</div></div>`)
       .join("");
   }
@@ -1292,11 +1338,21 @@
     function currentKeys() {
       if (phase === "triple") {
         if (!champLegs) return TRIPLE_KEYS;
-        const keys = [`champLeg${champLegIdx}-race`, `champLeg${champLegIdx}-specificRace`];
-        if (champLegIdx === 0) keys.push("season");
-        return keys;
+        // Season shows on every leg's Super Wheelspin (it's part of the
+        // championship result throughout, not just leg 1's) - see
+        // keysToSpin() for which of these actually animate.
+        return [`champLeg${champLegIdx}-race`, `champLeg${champLegIdx}-specificRace`, "season"];
       }
       return [SINGLE_KEYS[singleIdx]];
+    }
+
+    // Same as currentKeys(), except Season is dropped once it's already
+    // landed (leg 1) - it doesn't change leg to leg, so legs 2-3 just show
+    // it already-settled instead of re-spinning it.
+    function keysToSpin() {
+      const keys = currentKeys();
+      if (phase === "triple" && champLegs && champLegIdx > 0) return keys.filter((k) => k !== "season");
+      return keys;
     }
 
     function updateCounter() {
@@ -1317,11 +1373,17 @@
       wheelspinPanelEl.dataset.phase = phase;
       wheelspinStageEl.className = phase === "triple" ? "wheelspin-stage wheelspin-stage-triple" : "wheelspin-stage wheelspin-stage-single";
       wheelspinStageEl.innerHTML = "";
+      const spinKeys = new Set(keysToSpin());
       currentKeys().forEach((key) => {
         const desc = wheelDescriptor(key);
         const col = buildWheelCol(key, desc.cat);
         wheelspinStageEl.appendChild(col);
-        renderIdlePreview(col.querySelector('[data-role="wheel-reel"]'), desc.pool, desc.cat);
+        const reel = col.querySelector('[data-role="wheel-reel"]');
+        if (spinKeys.has(key)) {
+          renderIdlePreview(reel, desc.pool, desc.cat);
+        } else {
+          renderSettledReel(reel, desc.pool, desc.target, desc.cat);
+        }
       });
     }
 
@@ -1331,10 +1393,11 @@
 
     function startSpin() {
       wheelspinActionBtn.disabled = true;
-      const keys = currentKeys();
+      const keys = keysToSpin();
       // 50% longer than the original [1000,1500,2000]/[1100] pacing - the
       // extra time is what the pre-reveal white flash (see animateReel)
-      // needs. Sliced down to 2 for a Championship leg without Season.
+      // needs. Sliced down to 2 for a Championship leg 2-3, whose Season
+      // reel is already settled and isn't in `keys` at all.
       const durations = (phase === "triple" ? [1500, 2250, 3000] : [1650]).slice(0, keys.length);
       let toLand = keys.length;
       keys.forEach((key, i) => {
